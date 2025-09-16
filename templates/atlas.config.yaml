@@ -1,0 +1,24 @@
+mcp:
+  transports:
+    - name: filesystem
+      type: stdio
+      cmd: ["uvx", "modelcontextprotocol-servers", "filesystem"]
+      env:
+        ROOT: "/abs/path/to/workspaces/current"
+
+    - name: sqlite
+      type: stdio
+      cmd: ["uvx", "modelcontextprotocol-servers", "sqlite"]
+      env:
+        SQLITE_PATH: "/abs/path/to/atlas.db"
+
+    - name: git
+      type: stdio
+      cmd: ["uvx", "mcp-server-git"]
+      env:
+        REPO_PATH: "/abs/path/to/workspaces/current"
+
+    - name: fetch
+      type: http
+      url: "http://localhost:8822"
+      enabled: false

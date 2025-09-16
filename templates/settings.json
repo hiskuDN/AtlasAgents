@@ -1,0 +1,58 @@
+{
+  "models": {
+    "default": "local_gemma",
+    "per_agent": {
+      "planner": "local_gemma",
+      "spec_writer": "local_gemma",
+      "coder": "local_qwen",
+      "reviewer": "local_qwen"
+    },
+    "providers": {
+      "local_gemma": {
+        "type": "ollama",
+        "model": "gemma2:latest",
+        "url": "http://localhost:11434"
+      },
+      "local_qwen": {
+        "type": "ollama",
+        "model": "qwen2.5:latest",
+        "url": "http://localhost:11434"
+      },
+      "api_gpt4o": {
+        "type": "openai",
+        "model": "gpt-4o-mini",
+        "api_key": "${OPENAI_API_KEY}"
+      },
+      "api_claude": {
+        "type": "anthropic",
+        "model": "claude-3-haiku-20240307",
+        "api_key": "${ANTHROPIC_API_KEY}"
+      }
+    }
+  },
+  "trust": {
+    "default": "deny",
+    "allow": {
+      "planner": ["fs.read", "git.branch.list"],
+      "spec": ["fs.read", "fs.write.preview"],
+      "coder": ["fs.write.preview", "git.branch.create", "git.diff"],
+      "reviewer": ["git.diff", "fs.write.preview"]
+    },
+    "require_approval": [
+      "*.write*",
+      "git.*merge*",
+      "git.*push*",
+      "sql.write*"
+    ]
+  },
+  "telegram": {
+    "group_id": null,
+    "bot_token": null
+  },
+  "limits": {
+    "max_files_per_patch": 20,
+    "max_patch_kb": 256,
+    "max_context_tokens": 100000,
+    "timeout_seconds": 300
+  }
+}
