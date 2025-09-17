@@ -12,6 +12,8 @@ import threading
 
 from orchestrator.models.database import Database, JobStage, AgentRole
 from orchestrator.core.state_machine import StateMachine, StateContext
+from orchestrator.agents.base import AgentContext, AgentRequest
+from orchestrator.agents.factory import AgentFactory, get_factory
 
 
 logger = logging.getLogger(__name__)
@@ -33,9 +35,9 @@ class JobTask:
 class JobExecutor:
     """Executes individual jobs with an agent."""
 
-    def __init__(self, db: Database, agent_factory: Optional[Callable] = None):
+    def __init__(self, db: Database, agent_factory: Optional[AgentFactory] = None):
         self.db = db
-        self.agent_factory = agent_factory
+        self.agent_factory = agent_factory or get_factory()
         self._running_jobs: Dict[int, threading.Thread] = {}
 
     def execute(self, task: JobTask) -> Dict[str, Any]:
@@ -55,11 +57,12 @@ class JobExecutor:
             input_data = self._prepare_input(task)
 
             # Execute with the appropriate agent
-            if self.agent_factory:
-                agent = self.agent_factory(task.agent)
-                result = agent.execute(input_data)
+            agent = self.agent_factory.create_agent_for_stage(task.stage)
+            if agent:
+                # Run async agent execution in sync context
+                result = asyncio.run(self._execute_agent(agent, task, input_data))
             else:
-                # Mock execution for testing
+                # Fallback to mock execution
                 result = self._mock_execute(task, input_data)
 
             # Store output artifacts
@@ -87,6 +90,52 @@ class JobExecutor:
                 "status": "failed",
                 "error": str(e)
             }
+
+    async def _execute_agent(self, agent, task: JobTask, input_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Execute an agent asynchronously."""
+        # Build agent context
+        context = AgentContext(
+            project_id=task.project_id,
+            job_id=task.job_id,
+            stage=task.stage.value,
+            workspace_path=input_data['workspace_path'],
+            artifacts=input_data.get('artifacts', {}),
+            files=input_data.get('files', {}),
+            config=input_data.get('config', {}),
+            metadata=task.metadata
+        )
+
+        # Build agent request
+        request = AgentRequest(
+            context=context,
+            prompt=input_data.get('prompt', f"Execute {task.stage.value} stage for project")
+        )
+
+        # Initialize agent if needed
+        await agent.initialize()
+
+        try:
+            # Execute the agent
+            response = await agent.execute(request)
+
+            if response.success:
+                # Convert agent response to expected format
+                result = {
+                    'status': 'success',
+                    **response.artifacts
+                }
+
+                # Add metadata
+                if response.metadata:
+                    result['metadata'] = response.metadata
+
+                return result
+            else:
+                raise Exception(f"Agent execution failed: {response.error}")
+
+        finally:
+            # Cleanup agent resources
+            await agent.cleanup()
 
     def _prepare_input(self, task: JobTask) -> Dict[str, Any]:
         """Prepare input data for an agent based on the stage."""
@@ -139,22 +188,24 @@ class JobExecutor:
         output_refs = {}
 
         # Store stage-specific outputs
-        if task.stage == JobStage.PLAN and "plan" in result:
-            plan_path = project_dir / "docs" / "plan.md"
-            plan_path.parent.mkdir(parents=True, exist_ok=True)
-            plan_path.write_text(result["plan"])
-            output_refs["plan"] = str(plan_path)
+        if task.stage == JobStage.PLAN:
+            if "plan.md" in result:
+                plan_path = project_dir / "docs" / "plan.md"
+                plan_path.parent.mkdir(parents=True, exist_ok=True)
+                plan_path.write_text(result["plan.md"])
+                output_refs["plan"] = str(plan_path)
 
-            self.db.create_artifact(
-                job_id=task.job_id,
-                path=str(plan_path),
-                artifact_type="document"
-            )
+                self.db.create_artifact(
+                    job_id=task.job_id,
+                    path=str(plan_path),
+                    artifact_type="document"
+                )
 
         elif task.stage == JobStage.SPEC:
-            if "spec" in result:
+            if "spec.md" in result:
                 spec_path = project_dir / "docs" / "spec.md"
-                spec_path.write_text(result["spec"])
+                spec_path.parent.mkdir(parents=True, exist_ok=True)
+                spec_path.write_text(result["spec.md"])
                 output_refs["spec"] = str(spec_path)
 
                 self.db.create_artifact(
@@ -163,15 +214,43 @@ class JobExecutor:
                     artifact_type="document"
                 )
 
-            if "tasks" in result:
+            if "tasks.json" in result:
                 tasks_path = project_dir / "docs" / "tasks.json"
-                tasks_path.write_text(json.dumps(result["tasks"], indent=2))
+                tasks_path.parent.mkdir(parents=True, exist_ok=True)
+                tasks_path.write_text(result["tasks.json"])
                 output_refs["tasks"] = str(tasks_path)
 
                 self.db.create_artifact(
                     job_id=task.job_id,
                     path=str(tasks_path),
                     artifact_type="data"
+                )
+
+        elif task.stage == JobStage.CODE:
+            # Store code changes
+            if "code_changes" in result:
+                changes_path = project_dir / ".atlas" / "changes" / f"job_{task.job_id}.json"
+                changes_path.parent.mkdir(parents=True, exist_ok=True)
+                changes_path.write_text(json.dumps(result["code_changes"], indent=2))
+                output_refs["changes"] = str(changes_path)
+
+                self.db.create_artifact(
+                    job_id=task.job_id,
+                    path=str(changes_path),
+                    artifact_type="code"
+                )
+
+        elif task.stage == JobStage.REVIEW:
+            if "review.md" in result:
+                review_path = project_dir / "docs" / "review.md"
+                review_path.parent.mkdir(parents=True, exist_ok=True)
+                review_path.write_text(result["review.md"])
+                output_refs["review"] = str(review_path)
+
+                self.db.create_artifact(
+                    job_id=task.job_id,
+                    path=str(review_path),
+                    artifact_type="document"
                 )
 
         return output_refs
