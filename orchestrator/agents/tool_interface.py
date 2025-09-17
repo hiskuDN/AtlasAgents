@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 import logging
 
 from ..mcp.executor import ToolExecutor
-from ..mcp.permissions import PermissionChecker
+from ..mcp.permissions import PermissionEnforcer
 from ..core.config import AtlasConfig
 
 logger = logging.getLogger(__name__)
@@ -36,7 +36,7 @@ class AgentToolInterface:
     def __init__(
         self,
         executor: ToolExecutor,
-        permission_checker: PermissionChecker,
+        permission_checker: PermissionEnforcer,
         agent_role: str,
         project_id: Optional[int] = None,
         job_id: Optional[int] = None
