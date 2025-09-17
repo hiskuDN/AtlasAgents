@@ -1,0 +1,4 @@
+# Development requirements
+setuptools>=68.0
+wheel>=0.40.0
+pip>=23.0
