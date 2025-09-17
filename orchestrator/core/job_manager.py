@@ -11,7 +11,7 @@ from queue import Queue, PriorityQueue
 import threading
 
 from orchestrator.models.database import Database, JobStage, AgentRole
-from orchestrator.core.state_machine import StateMachine, StateContext
+from orchestrator.core.state_machine import StateMachine, StateContext, StateTransition
 from orchestrator.agents.base import AgentContext, AgentRequest
 from orchestrator.agents.factory import AgentFactory, get_factory
 
@@ -415,7 +415,7 @@ class JobManager:
             stage = context.current_stage
 
         # Get agent for stage
-        agent = self.state_machine.StateTransition.get_agent_for_stage(stage)
+        agent = StateTransition.get_agent_for_stage(stage)
         if not agent:
             logger.error(f"No agent for stage {stage}")
             return None

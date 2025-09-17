@@ -10,7 +10,14 @@ from .mock_agents import (
     MockCoderAgent,
     MockReviewerAgent
 )
+from .llm_agents import (
+    LLMPlannerAgent,
+    LLMSpecWriterAgent,
+    LLMCoderAgent,
+    LLMReviewerAgent
+)
 from ..core.state_machine import JobStage
+from ..llm.model_router import ModelConfig, ModelProvider
 
 logger = logging.getLogger(__name__)
 
@@ -18,19 +25,34 @@ logger = logging.getLogger(__name__)
 class AgentRegistry:
     """Registry for available agents."""
 
-    def __init__(self):
-        """Initialize the registry."""
+    def __init__(self, use_llm: bool = False):
+        """Initialize the registry.
+
+        Args:
+            use_llm: Whether to use LLM agents instead of mock agents
+        """
         self._agents: Dict[AgentRole, Type[BaseAgent]] = {}
         self._stage_mapping: Dict[JobStage, AgentRole] = {}
+        self.use_llm = use_llm
         self._register_default_agents()
         self._setup_stage_mapping()
 
     def _register_default_agents(self):
-        """Register the default mock agents."""
-        self.register(AgentRole.PLANNER, MockPlannerAgent)
-        self.register(AgentRole.SPEC_WRITER, MockSpecWriterAgent)
-        self.register(AgentRole.CODER, MockCoderAgent)
-        self.register(AgentRole.REVIEWER, MockReviewerAgent)
+        """Register the default agents."""
+        if self.use_llm:
+            # Register LLM agents
+            self.register(AgentRole.PLANNER, LLMPlannerAgent)
+            self.register(AgentRole.SPEC_WRITER, LLMSpecWriterAgent)
+            self.register(AgentRole.CODER, LLMCoderAgent)
+            self.register(AgentRole.REVIEWER, LLMReviewerAgent)
+            logger.info("Registered LLM agents")
+        else:
+            # Register mock agents
+            self.register(AgentRole.PLANNER, MockPlannerAgent)
+            self.register(AgentRole.SPEC_WRITER, MockSpecWriterAgent)
+            self.register(AgentRole.CODER, MockCoderAgent)
+            self.register(AgentRole.REVIEWER, MockReviewerAgent)
+            logger.info("Registered mock agents")
 
     def _setup_stage_mapping(self):
         """Set up the mapping from job stages to agent roles."""
@@ -90,15 +112,17 @@ class AgentRegistry:
 class AgentFactory:
     """Factory for creating agent instances."""
 
-    def __init__(self, registry: Optional[AgentRegistry] = None):
+    def __init__(self, registry: Optional[AgentRegistry] = None, use_llm: bool = False):
         """Initialize the factory.
 
         Args:
             registry: Agent registry to use (creates default if None)
+            use_llm: Whether to use LLM agents
         """
-        self.registry = registry or AgentRegistry()
+        self.registry = registry or AgentRegistry(use_llm=use_llm)
         self._instances: Dict[str, BaseAgent] = {}
         self._config: Dict[AgentRole, Dict[str, Any]] = {}
+        self.use_llm = use_llm
 
     def create_agent(
         self,
@@ -202,15 +226,18 @@ class AgentFactory:
 _factory: Optional[AgentFactory] = None
 
 
-def get_factory() -> AgentFactory:
+def get_factory(use_llm: bool = False) -> AgentFactory:
     """Get the global agent factory instance.
+
+    Args:
+        use_llm: Whether to use LLM agents
 
     Returns:
         The agent factory
     """
     global _factory
-    if _factory is None:
-        _factory = AgentFactory()
+    if _factory is None or _factory.use_llm != use_llm:
+        _factory = AgentFactory(use_llm=use_llm)
     return _factory
 
 

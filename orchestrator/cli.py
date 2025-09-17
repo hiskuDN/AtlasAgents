@@ -193,8 +193,9 @@ def status(ctx, detailed):
 @cli.command()
 @click.argument('stage', required=False)
 @click.option('--priority', '-p', default=5, type=int, help='Job priority (1-10, lower is higher priority)')
+@click.option('--llm', is_flag=True, help='Use LLM agents instead of mock agents')
 @pass_context
-def run(ctx, stage, priority):
+def run(ctx, stage, priority, llm):
     """Run a stage (or continue from current stage)."""
     ctx.ensure_initialized()
 
@@ -209,6 +210,14 @@ def run(ctx, stage, priority):
         stage_name = stage.upper() if stage else "current stage"
 
         with console.status(f"[bold green]Starting {stage_name}..."):
+            # Set agent mode
+            if llm:
+                ctx.orchestrator.set_agent_factory(use_llm=True)
+                console.print("[yellow]Using LLM agents (phi4:latest)[/yellow]")
+            else:
+                ctx.orchestrator.set_agent_factory(use_llm=False)
+                console.print("[dim]Using mock agents[/dim]")
+
             job_id = ctx.orchestrator.run_stage(stage)
 
         if job_id:

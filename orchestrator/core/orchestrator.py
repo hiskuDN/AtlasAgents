@@ -12,11 +12,12 @@ from enum import Enum
 from orchestrator.models.database import (
     Database, JobStage, AgentRole, ApprovalStatus, MessageRole
 )
-from orchestrator.core.state_machine import StateMachine, StateContext
+from orchestrator.core.state_machine import StateMachine, StateContext, StateTransition
 from orchestrator.core.job_manager import JobManager, JobExecutor
 from orchestrator.core.config import AtlasConfig, get_config
 from orchestrator.utils.paths import PathManager, get_path_manager
 from orchestrator.mcp.manager import MCPManager, SimpleMCPManager
+from orchestrator.agents.factory import get_factory
 
 
 logger = logging.getLogger(__name__)
@@ -110,7 +111,9 @@ class Orchestrator:
 
         # Core components
         self.state_machine = StateMachine(self.db)
-        self.job_executor = JobExecutor(self.db, self._create_agent)
+        # Use agent factory instead of simple function
+        agent_factory = get_factory()
+        self.job_executor = JobExecutor(self.db, agent_factory)
         self.job_manager = JobManager(self.db, self.state_machine, self.job_executor)
 
         # Event system
@@ -126,6 +129,9 @@ class Orchestrator:
         # Start job manager
         self.job_manager.start()
 
+        # Load current project if exists
+        self._load_current_project()
+
         logger.info("Orchestrator initialized")
 
     def _register_internal_handlers(self):
@@ -134,11 +140,16 @@ class Orchestrator:
         self.events.register(OrchestratorEvent.APPROVAL_GRANTED, self._on_approval_granted)
         self.events.register(OrchestratorEvent.STATE_CHANGED, self._on_state_changed)
 
-    def _create_agent(self, agent_role: AgentRole):
-        """Factory method to create agents (placeholder for now)."""
-        # This will be implemented when we build the agent framework
-        logger.info(f"Creating agent for role: {agent_role}")
-        return None
+    def set_agent_factory(self, use_llm: bool = False):
+        """Update the agent factory.
+
+        Args:
+            use_llm: Whether to use LLM agents
+        """
+        from orchestrator.agents.factory import AgentFactory
+        agent_factory = AgentFactory(use_llm=use_llm)
+        self.job_executor.agent_factory = agent_factory
+        logger.info(f"Agent factory updated: use_llm={use_llm}")
 
     def _on_job_completed(self, event: OrchestratorEvent, data: Dict):
         """Handle job completion."""
@@ -149,7 +160,7 @@ class Orchestrator:
 
         # Check if approval is needed
         context = self.state_machine.get_context(project_id)
-        if self.state_machine.StateTransition.requires_approval(context.current_stage):
+        if StateTransition.requires_approval(context.current_stage):
             self.request_approval(project_id, job_id)
 
     def _on_approval_granted(self, event: OrchestratorEvent, data: Dict):
@@ -174,6 +185,26 @@ class Orchestrator:
         # Update project context
         if project_id in self.project_contexts:
             self.db.update_project_stage(project_id, new_stage)
+
+    def _load_current_project(self):
+        """Load the current project from persistent storage."""
+        current_name = self.path_manager.get_current_project()
+        if current_name:
+            # Find project in database
+            project = self.db.get_project(name=current_name)
+            if project:
+                # Set as current without emitting events
+                self.current_project_id = project['id']
+                context = ProjectContext(
+                    project_id=project['id'],
+                    project_name=project['name'],
+                    workspace_path=Path(project['workspace_path'])
+                )
+                self.project_contexts[project['id']] = context
+                # Restart MCP manager for the project
+                if hasattr(self.mcp_manager, 'set_project'):
+                    self.mcp_manager.set_project(project['name'], Path(project['workspace_path']))
+                logger.info(f"Loaded current project: {current_name}")
 
     # Project Management
 
