@@ -440,8 +440,11 @@ def mcp_status(ctx):
 
 @mcp.command('tools')
 @click.option('--server', '-s', help='Filter by server name')
+@click.option('--category', '-c', help='Filter by category')
+@click.option('--operation', '-o', help='Filter by operation type')
+@click.option('--safe', is_flag=True, help='Show only safe tools')
 @pass_context
-def mcp_tools(ctx, server):
+def mcp_tools(ctx, server, category, operation, safe):
     """List available MCP tools."""
     ctx.ensure_initialized()
 
@@ -452,22 +455,46 @@ def mcp_tools(ctx, server):
             console.print("[yellow]No tools available[/yellow]")
             return
 
-        # Filter by server if specified
+        # Apply filters
         if server:
-            tools = {k: v for k, v in tools.items() if k.startswith(f"{server}.")}
+            tools = {k: v for k, v in tools.items() if v['server'] == server}
+        if category:
+            tools = {k: v for k, v in tools.items() if v['category'] == category.lower()}
+        if operation:
+            tools = {k: v for k, v in tools.items() if v['operation'] == operation.lower()}
+        if safe:
+            tools = {k: v for k, v in tools.items() if not v['requires_approval']}
 
         table = Table(title="Available MCP Tools", show_header=True)
         table.add_column("Tool ID", style="cyan")
+        table.add_column("Category", style="yellow")
+        table.add_column("Operation", style="green")
+        table.add_column("Server", style="magenta")
+        table.add_column("Approval", style="red")
         table.add_column("Description", style="white")
 
         for tool_id, tool_info in tools.items():
             description = tool_info.get('description', 'No description')
-            if len(description) > 60:
-                description = description[:57] + "..."
-            table.add_row(tool_id, description)
+            if description and len(description) > 40:
+                description = description[:37] + "..."
+
+            approval = "✓" if tool_info.get('requires_approval') else "-"
+
+            table.add_row(
+                tool_id,
+                tool_info.get('category', '?'),
+                tool_info.get('operation', '?'),
+                tool_info.get('server', '?'),
+                approval,
+                description or ""
+            )
 
         console.print(table)
-        console.print(f"\n[dim]Total tools: {len(tools)}[/dim]")
+
+        # Show statistics
+        stats = ctx.orchestrator.mcp_manager.registry.get_statistics()
+        console.print(f"\n[dim]Total: {len(tools)} tools")
+        console.print(f"Safe: {stats.get('safe', 0)} | Requiring approval: {stats.get('requiring_approval', 0)}[/dim]")
 
     except Exception as e:
         console.print(f"[red]Failed to list tools:[/red] {e}")

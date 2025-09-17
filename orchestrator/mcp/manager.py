@@ -7,6 +7,7 @@ import yaml
 import json
 
 from orchestrator.mcp.client import MCPClient, MCPServer, get_mcp_client
+from orchestrator.mcp.registry import ToolRegistry, ToolMetadata, ToolCategory, ToolOperation
 from orchestrator.core.config import MCPConfig, AtlasConfig
 from orchestrator.utils.paths import PathManager
 from orchestrator.utils.logging import get_logger
@@ -24,6 +25,7 @@ class MCPManager:
         self.config = config
         self.path_manager = path_manager
         self.client = get_mcp_client()
+        self.registry = ToolRegistry()
         self._started = False
 
         # Register cleanup
@@ -88,6 +90,9 @@ class MCPManager:
             # Start the client (connects to all servers)
             self.client.start()
 
+            # Discover and register tools
+            self._discover_and_register_tools()
+
             self._started = True
             logger.info(f"Started MCP Manager with {len(servers)} servers")
 
@@ -110,6 +115,34 @@ class MCPManager:
         except Exception as e:
             logger.error(f"Error stopping MCP Manager: {e}")
 
+    def _discover_and_register_tools(self):
+        """Discover tools from MCP servers and register them."""
+        # Clear existing registry
+        self.registry.clear()
+
+        # Get tools from client
+        tools = self.client.list_tools()
+
+        # Register each tool
+        for tool_id, tool in tools.items():
+            server = self.client.tool_to_server.get(tool_id, "unknown")
+
+            # Create tool info dict
+            tool_info = {
+                "name": tool.name if hasattr(tool, 'name') else tool_id,
+                "description": tool.description if hasattr(tool, 'description') else None,
+                "input_schema": tool.inputSchema if hasattr(tool, 'inputSchema') else {}
+            }
+
+            # Register with the registry
+            self.registry.register_tool(tool_id, server, tool_info)
+
+        logger.info(f"Registered {len(tools)} tools in registry")
+
+        # Log statistics
+        stats = self.registry.get_statistics()
+        logger.info(f"Tool statistics: {stats}")
+
     def restart_for_project(self, project_name: str):
         """Restart MCP servers with new project context."""
         logger.info(f"Restarting MCP Manager for project: {project_name}")
@@ -126,18 +159,29 @@ class MCPManager:
         if not self._started:
             return {}
 
-        tools = self.client.list_tools()
-
-        # Format for display
+        # Use registry to get detailed tool information
         formatted_tools = {}
-        for tool_id, tool in tools.items():
+        for tool_id, metadata in self.registry.tools.items():
             formatted_tools[tool_id] = {
-                "name": tool.name,
-                "description": tool.description,
-                "input_schema": tool.inputSchema if hasattr(tool, 'inputSchema') else {}
+                "name": metadata.name,
+                "description": metadata.description,
+                "category": metadata.category.value,
+                "operation": metadata.operation.value,
+                "requires_approval": metadata.requires_approval,
+                "server": metadata.server
             }
 
         return formatted_tools
+
+    def get_tool_metadata(self, tool_id: str) -> Optional[ToolMetadata]:
+        """Get metadata for a specific tool."""
+        return self.registry.get_tool(tool_id)
+
+    def get_tools_for_agent(self, agent_role: str) -> List[ToolMetadata]:
+        """Get tools allowed for a specific agent role based on trust policy."""
+        # This will be implemented in the permission system
+        # For now, return all tools
+        return list(self.registry.tools.values())
 
     def call_tool(self, tool_id: str, arguments: Dict[str, Any]) -> Any:
         """
@@ -198,16 +242,30 @@ class SimpleMCPManager:
     """Simplified MCP manager for testing without actual MCP servers."""
 
     def __init__(self):
-        self.tools = {
-            "filesystem.read": {"description": "Read a file"},
-            "filesystem.write": {"description": "Write to a file"},
-            "filesystem.list": {"description": "List directory contents"},
-            "git.status": {"description": "Get git status"},
-            "git.branch": {"description": "Manage git branches"},
-            "sqlite.query": {"description": "Query SQLite database"}
+        self.registry = ToolRegistry()
+        self.mock_tools = {
+            "filesystem.read": {"description": "Read a file", "server": "filesystem"},
+            "filesystem.write": {"description": "Write to a file", "server": "filesystem"},
+            "filesystem.list": {"description": "List directory contents", "server": "filesystem"},
+            "git.status": {"description": "Get git status", "server": "git"},
+            "git.branch": {"description": "Manage git branches", "server": "git"},
+            "git.diff": {"description": "Show git differences", "server": "git"},
+            "sqlite.query": {"description": "Query SQLite database", "server": "sqlite"},
+            "sqlite.execute": {"description": "Execute SQLite command", "server": "sqlite"}
         }
         self._started = False
+        self._register_mock_tools()
         logger.info("SimpleMCPManager initialized (mock mode)")
+
+    def _register_mock_tools(self):
+        """Register mock tools in the registry."""
+        for tool_id, info in self.mock_tools.items():
+            tool_info = {
+                "name": tool_id.split('.')[-1],
+                "description": info["description"],
+                "input_schema": {}
+            }
+            self.registry.register_tool(tool_id, info["server"], tool_info)
 
     def start(self, project_name: Optional[str] = None):
         """Mock start."""
@@ -226,7 +284,26 @@ class SimpleMCPManager:
 
     def list_tools(self) -> Dict[str, Any]:
         """Return mock tools."""
-        return self.tools
+        formatted_tools = {}
+        for tool_id, metadata in self.registry.tools.items():
+            formatted_tools[tool_id] = {
+                "name": metadata.name,
+                "description": metadata.description,
+                "category": metadata.category.value,
+                "operation": metadata.operation.value,
+                "requires_approval": metadata.requires_approval,
+                "server": metadata.server
+            }
+        return formatted_tools
+
+    def get_tool_metadata(self, tool_id: str) -> Optional[ToolMetadata]:
+        """Get metadata for a specific tool."""
+        return self.registry.get_tool(tool_id)
+
+    def get_tools_for_agent(self, agent_role: str) -> List[ToolMetadata]:
+        """Get tools allowed for a specific agent role."""
+        # For mock, return all tools
+        return list(self.registry.tools.values())
 
     def call_tool(self, tool_id: str, arguments: Dict[str, Any]) -> Any:
         """Mock tool execution."""
