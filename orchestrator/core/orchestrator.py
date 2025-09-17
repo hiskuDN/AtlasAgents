@@ -103,7 +103,7 @@ class Orchestrator:
 
         # MCP Manager (use mock for testing)
         if use_mock_mcp:
-            self.mcp_manager = SimpleMCPManager()
+            self.mcp_manager = SimpleMCPManager(self.config)
         else:
             self.mcp_manager = MCPManager(self.config, self.path_manager)
 

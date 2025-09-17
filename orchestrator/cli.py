@@ -504,8 +504,9 @@ def mcp_tools(ctx, server, category, operation, safe):
 @mcp.command('test')
 @click.argument('tool_id')
 @click.option('--args', '-a', help='Tool arguments as JSON')
+@click.option('--agent', help='Test as specific agent role')
 @pass_context
-def mcp_test(ctx, tool_id, args):
+def mcp_test(ctx, tool_id, args, agent):
     """Test an MCP tool."""
     ctx.ensure_initialized()
 
@@ -520,10 +521,14 @@ def mcp_test(ctx, tool_id, args):
                 sys.exit(1)
 
         console.print(f"[bold]Testing tool:[/bold] {tool_id}")
+        if agent:
+            console.print(f"[dim]As agent:[/dim] {agent}")
         console.print(f"[dim]Arguments:[/dim] {tool_args}")
 
         with console.status("[bold green]Executing tool..."):
-            result = ctx.orchestrator.mcp_manager.call_tool(tool_id, tool_args)
+            result = ctx.orchestrator.mcp_manager.call_tool(
+                tool_id, tool_args, agent_role=agent
+            )
 
         console.print("\n[bold green]Result:[/bold]")
         if isinstance(result, dict):
@@ -534,6 +539,61 @@ def mcp_test(ctx, tool_id, args):
 
     except Exception as e:
         console.print(f"[red]Tool execution failed:[/red] {e}")
+        if ctx.verbose:
+            console.print_exception()
+        sys.exit(1)
+
+
+@mcp.command('permissions')
+@click.argument('agent_role')
+@click.option('--check', '-c', help='Check permission for specific tool')
+@pass_context
+def mcp_permissions(ctx, agent_role, check):
+    """View permissions for an agent role."""
+    ctx.ensure_initialized()
+
+    try:
+        # Get permission summary
+        summary = ctx.orchestrator.mcp_manager.permission_manager.validate_agent_permissions(agent_role)
+
+        console.print(Panel.fit(
+            f"[bold]Permissions for {agent_role}[/bold]\n"
+            f"Default policy: {summary['default_policy']}\n"
+            f"Can read: {'[green]Yes[/green]' if summary['can_read'] else '[red]No[/red]'}\n"
+            f"Can write: {'[green]Yes[/green]' if summary['can_write'] else '[red]No[/red]'}\n"
+            f"Can execute: {'[green]Yes[/green]' if summary['can_execute'] else '[red]No[/red]'}",
+            border_style="blue"
+        ))
+
+        # Show allowed patterns
+        if summary['allowed_patterns']:
+            console.print("\n[bold]Allowed patterns:[/bold]")
+            for pattern in summary['allowed_patterns']:
+                console.print(f"  • {pattern}")
+
+        # Check specific tool if requested
+        if check:
+            tool_metadata = ctx.orchestrator.mcp_manager.registry.get_tool(check)
+            permission_check = ctx.orchestrator.mcp_manager.permission_manager.check_permission(
+                agent_role, check, tool_metadata
+            )
+
+            console.print(f"\n[bold]Permission check for '{check}':[/bold]")
+            if permission_check.allowed:
+                console.print(f"  [green]✓ Allowed[/green]")
+                if permission_check.requires_approval:
+                    console.print(f"  [yellow]⚠ Requires approval[/yellow]")
+            else:
+                console.print(f"  [red]✗ Denied: {permission_check.reason}[/red]")
+
+        # Show allowed tools
+        all_tools = list(ctx.orchestrator.mcp_manager.registry.tools.values())
+        allowed_tools = ctx.orchestrator.mcp_manager.get_tools_for_agent(agent_role)
+
+        console.print(f"\n[dim]Allowed tools: {len(allowed_tools)}/{len(all_tools)}[/dim]")
+
+    except Exception as e:
+        console.print(f"[red]Failed to get permissions:[/red] {e}")
         if ctx.verbose:
             console.print_exception()
         sys.exit(1)

@@ -8,10 +8,11 @@ import json
 
 from orchestrator.mcp.client import MCPClient, MCPServer, get_mcp_client
 from orchestrator.mcp.registry import ToolRegistry, ToolMetadata, ToolCategory, ToolOperation
+from orchestrator.mcp.permissions import PermissionManager, PermissionEnforcer
 from orchestrator.core.config import MCPConfig, AtlasConfig
 from orchestrator.utils.paths import PathManager
 from orchestrator.utils.logging import get_logger
-from orchestrator.utils.exceptions import MCPConnectionError, ConfigurationError
+from orchestrator.utils.exceptions import MCPConnectionError, ConfigurationError, MCPToolError
 from orchestrator.utils.shutdown import register_cleanup
 
 
@@ -26,6 +27,8 @@ class MCPManager:
         self.path_manager = path_manager
         self.client = get_mcp_client()
         self.registry = ToolRegistry()
+        self.permission_manager = PermissionManager(config)
+        self.permission_enforcer = PermissionEnforcer(self.permission_manager)
         self._started = False
 
         # Register cleanup
@@ -179,17 +182,22 @@ class MCPManager:
 
     def get_tools_for_agent(self, agent_role: str) -> List[ToolMetadata]:
         """Get tools allowed for a specific agent role based on trust policy."""
-        # This will be implemented in the permission system
-        # For now, return all tools
-        return list(self.registry.tools.values())
+        all_tools = list(self.registry.tools.values())
+        return self.permission_manager.get_allowed_tools(agent_role, all_tools)
 
-    def call_tool(self, tool_id: str, arguments: Dict[str, Any]) -> Any:
+    def call_tool(self, tool_id: str, arguments: Dict[str, Any],
+                 agent_role: Optional[str] = None,
+                 project_id: Optional[int] = None,
+                 job_id: Optional[int] = None) -> Any:
         """
-        Execute a tool through MCP.
+        Execute a tool through MCP with permission checking.
 
         Args:
             tool_id: Tool identifier (e.g., "filesystem.read")
             arguments: Tool arguments
+            agent_role: Role of agent calling the tool (for permissions)
+            project_id: Optional project ID for audit
+            job_id: Optional job ID for audit
 
         Returns:
             Tool execution result
@@ -197,7 +205,21 @@ class MCPManager:
         if not self._started:
             raise MCPConnectionError("manager", "MCP Manager not started")
 
-        logger.info(f"Executing tool: {tool_id}", tool_id=tool_id, arguments=arguments)
+        # Check permissions if agent role is provided
+        if agent_role:
+            tool_metadata = self.registry.get_tool(tool_id)
+            allowed, error_msg = self.permission_enforcer.enforce(
+                agent_role, tool_id, tool_metadata, project_id, job_id
+            )
+
+            if not allowed:
+                raise MCPToolError(tool_id, error_msg)
+
+        logger.info(f"Executing tool: {tool_id}",
+                   tool_id=tool_id,
+                   agent=agent_role,
+                   project_id=project_id,
+                   job_id=job_id)
 
         try:
             result = self.client.call_tool(tool_id, arguments)
@@ -241,8 +263,12 @@ class MCPManager:
 class SimpleMCPManager:
     """Simplified MCP manager for testing without actual MCP servers."""
 
-    def __init__(self):
+    def __init__(self, config: Optional[AtlasConfig] = None):
+        from orchestrator.core.config import get_config
+        self.config = config or get_config()
         self.registry = ToolRegistry()
+        self.permission_manager = PermissionManager(self.config)
+        self.permission_enforcer = PermissionEnforcer(self.permission_manager)
         self.mock_tools = {
             "filesystem.read": {"description": "Read a file", "server": "filesystem"},
             "filesystem.write": {"description": "Write to a file", "server": "filesystem"},
@@ -302,11 +328,24 @@ class SimpleMCPManager:
 
     def get_tools_for_agent(self, agent_role: str) -> List[ToolMetadata]:
         """Get tools allowed for a specific agent role."""
-        # For mock, return all tools
-        return list(self.registry.tools.values())
+        all_tools = list(self.registry.tools.values())
+        return self.permission_manager.get_allowed_tools(agent_role, all_tools)
 
-    def call_tool(self, tool_id: str, arguments: Dict[str, Any]) -> Any:
-        """Mock tool execution."""
+    def call_tool(self, tool_id: str, arguments: Dict[str, Any],
+                 agent_role: Optional[str] = None,
+                 project_id: Optional[int] = None,
+                 job_id: Optional[int] = None) -> Any:
+        """Mock tool execution with permission checking."""
+        # Check permissions if agent role is provided
+        if agent_role:
+            tool_metadata = self.registry.get_tool(tool_id)
+            allowed, error_msg = self.permission_enforcer.enforce(
+                agent_role, tool_id, tool_metadata, project_id, job_id
+            )
+
+            if not allowed:
+                raise MCPToolError(tool_id, error_msg)
+
         logger.info(f"Mock executing tool: {tool_id} with args: {arguments}")
 
         # Return mock responses
