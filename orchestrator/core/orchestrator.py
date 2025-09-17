@@ -105,7 +105,8 @@ class Orchestrator:
         if use_mock_mcp:
             self.mcp_manager = SimpleMCPManager(self.config)
         else:
-            self.mcp_manager = MCPManager(self.config, self.path_manager)
+            self.mcp_manager = MCPManager(self.config, self.path_manager, self.db)
+            self.mcp_manager.set_database(self.db)
 
         # Core components
         self.state_machine = StateMachine(self.db)

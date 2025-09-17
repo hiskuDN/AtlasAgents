@@ -599,6 +599,120 @@ def mcp_permissions(ctx, agent_role, check):
         sys.exit(1)
 
 
+@mcp.command('pending')
+@pass_context
+def mcp_pending(ctx):
+    """Show pending tool calls awaiting approval."""
+    ctx.ensure_initialized()
+
+    try:
+        # Get pending calls
+        pending = ctx.orchestrator.mcp_manager.get_pending_tool_calls()
+
+        if not pending:
+            console.print("[green]No pending tool calls[/green]")
+            return
+
+        table = Table(title="Pending Tool Calls", show_header=True)
+        table.add_column("Call ID", style="cyan")
+        table.add_column("Tool", style="yellow")
+        table.add_column("Agent", style="green")
+        table.add_column("Created", style="white")
+        table.add_column("Project", style="magenta")
+
+        for call in pending:
+            table.add_row(
+                call.call_id[:8] + "...",
+                call.tool_id,
+                call.agent_role,
+                call.created_at.strftime("%H:%M:%S"),
+                str(call.project_id) if call.project_id else "-"
+            )
+
+        console.print(table)
+        console.print(f"\n[dim]Use 'atlas mcp approve <call_id>' to approve a call[/dim]")
+
+    except Exception as e:
+        console.print(f"[red]Failed to get pending calls:[/red] {e}")
+        sys.exit(1)
+
+
+@mcp.command('approve')
+@click.argument('call_id')
+@click.option('--reason', '-r', help='Reason for approval')
+@pass_context
+def mcp_approve(ctx, call_id, reason):
+    """Approve a pending tool call."""
+    ctx.ensure_initialized()
+
+    try:
+        # Find full call_id if partial was provided
+        pending = ctx.orchestrator.mcp_manager.get_pending_tool_calls()
+        full_call_id = None
+        for call in pending:
+            if call.call_id.startswith(call_id):
+                full_call_id = call.call_id
+                break
+
+        if not full_call_id:
+            console.print(f"[red]Tool call not found: {call_id}[/red]")
+            sys.exit(1)
+
+        # Approve the call
+        result = ctx.orchestrator.mcp_manager.approve_tool_call(
+            full_call_id, "cli_user", reason
+        )
+
+        if result.success:
+            console.print(f"[green]✓[/green] Tool call approved and executed: {call_id}")
+            if result.result:
+                console.print("[bold]Result:[/bold]")
+                console.print(json.dumps(result.result, indent=2))
+        else:
+            console.print(f"[red]Tool execution failed: {result.error}[/red]")
+
+    except Exception as e:
+        console.print(f"[red]Failed to approve tool call:[/red] {e}")
+        if ctx.verbose:
+            console.print_exception()
+        sys.exit(1)
+
+
+@mcp.command('deny')
+@click.argument('call_id')
+@click.option('--reason', '-r', help='Reason for denial')
+@pass_context
+def mcp_deny(ctx, call_id, reason):
+    """Deny a pending tool call."""
+    ctx.ensure_initialized()
+
+    try:
+        # Find full call_id if partial was provided
+        pending = ctx.orchestrator.mcp_manager.get_pending_tool_calls()
+        full_call_id = None
+        for call in pending:
+            if call.call_id.startswith(call_id):
+                full_call_id = call.call_id
+                break
+
+        if not full_call_id:
+            console.print(f"[red]Tool call not found: {call_id}[/red]")
+            sys.exit(1)
+
+        # Deny the call
+        ctx.orchestrator.mcp_manager.deny_tool_call(
+            full_call_id, "cli_user", reason or "Denied via CLI"
+        )
+
+        console.print(f"[yellow]✗[/yellow] Tool call denied: {call_id}")
+
+    except Exception as e:
+        console.print(f"[red]Failed to deny tool call:[/red] {e}")
+        if ctx.verbose:
+            console.print_exception()
+        sys.exit(1)
+
+
 @cli.command()
 @click.argument('approval_id', type=int)
 @click.argument('decision', type=click.Choice(['approve', 'revise', 'stop']))

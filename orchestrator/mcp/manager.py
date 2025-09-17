@@ -9,6 +9,7 @@ import json
 from orchestrator.mcp.client import MCPClient, MCPServer, get_mcp_client
 from orchestrator.mcp.registry import ToolRegistry, ToolMetadata, ToolCategory, ToolOperation
 from orchestrator.mcp.permissions import PermissionManager, PermissionEnforcer
+from orchestrator.mcp.executor import ToolExecutor, ToolCallRequest, ToolCallStatus
 from orchestrator.core.config import MCPConfig, AtlasConfig
 from orchestrator.utils.paths import PathManager
 from orchestrator.utils.logging import get_logger
@@ -22,13 +23,16 @@ logger = get_logger(__name__)
 class MCPManager:
     """Manages MCP server connections and tool execution."""
 
-    def __init__(self, config: AtlasConfig, path_manager: PathManager):
+    def __init__(self, config: AtlasConfig, path_manager: PathManager,
+                 db=None):
         self.config = config
         self.path_manager = path_manager
         self.client = get_mcp_client()
         self.registry = ToolRegistry()
         self.permission_manager = PermissionManager(config)
         self.permission_enforcer = PermissionEnforcer(self.permission_manager)
+        self.tool_executor = None  # Will be set when DB is available
+        self.db = db
         self._started = False
 
         # Register cleanup
@@ -76,6 +80,13 @@ class MCPManager:
             logger.debug(f"Updated sqlite SQLITE_PATH to: {db_path}")
 
         return server_config
+
+    def set_database(self, db):
+        """Set the database and initialize tool executor."""
+        self.db = db
+        if db:
+            self.tool_executor = ToolExecutor(db, self, self.permission_manager)
+            logger.info("Tool executor initialized with database")
 
     def start(self, project_name: Optional[str] = None):
         """Start MCP servers for a project."""
@@ -258,6 +269,46 @@ class MCPManager:
                 return False
 
         return True
+
+    def request_tool_with_approval(self, tool_id: str, arguments: Dict[str, Any],
+                                  agent_role: str, project_id: Optional[int] = None,
+                                  job_id: Optional[int] = None) -> str:
+        """
+        Request a tool execution with approval flow.
+
+        Returns:
+            call_id for tracking
+        """
+        if not self.tool_executor:
+            # Fallback to direct execution if no executor
+            logger.warning("No tool executor, falling back to direct execution")
+            result = self.call_tool(tool_id, arguments, agent_role, project_id, job_id)
+            return str(result)
+
+        return self.tool_executor.request_tool(
+            tool_id, arguments, agent_role, project_id, job_id
+        )
+
+    def approve_tool_call(self, call_id: str, actor: str, reason: Optional[str] = None):
+        """Approve a pending tool call."""
+        if not self.tool_executor:
+            raise ValueError("Tool executor not initialized")
+
+        return self.tool_executor.approve_tool(call_id, actor, reason)
+
+    def deny_tool_call(self, call_id: str, actor: str, reason: Optional[str] = None):
+        """Deny a pending tool call."""
+        if not self.tool_executor:
+            raise ValueError("Tool executor not initialized")
+
+        return self.tool_executor.deny_tool(call_id, actor, reason)
+
+    def get_pending_tool_calls(self, project_id: Optional[int] = None) -> List[ToolCallRequest]:
+        """Get pending tool calls."""
+        if not self.tool_executor:
+            return []
+
+        return self.tool_executor.get_pending_calls(project_id)
 
 
 class SimpleMCPManager:
