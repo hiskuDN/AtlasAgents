@@ -1,0 +1,7 @@
+#!/usr/bin/env python3
+"""AtlasAgents CLI entry point."""
+
+from orchestrator.cli import main
+
+if __name__ == '__main__':
+    main()

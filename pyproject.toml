@@ -59,6 +59,9 @@ dev = [
 [project.scripts]
 atlas = "orchestrator.cli:main"
 
+[tool.setuptools]
+py-modules = ["orchestrator"]
+
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["orchestrator*", "templates*"]
