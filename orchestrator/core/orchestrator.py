@@ -280,6 +280,34 @@ class Orchestrator:
             return self.project_contexts.get(self.current_project_id)
         return None
 
+    def delete_project(self, project_name: str):
+        """Delete a project by name."""
+        project = self.db.get_project(name=project_name)
+        if not project:
+            raise ValueError(f"Project '{project_name}' not found")
+
+        project_id = project['id']
+        self.db.delete_project(project_id)
+
+        # Also remove workspace directory
+        path_manager = get_path_manager()
+        project_dir = path_manager.get_project_dir(project_name)
+        if project_dir.exists():
+            import shutil
+            shutil.rmtree(project_dir)
+
+        # If it was the current project, clear it
+        current_project = self.path_manager.get_current_project()
+        if current_project == project_name:
+            self.current_project_id = None
+            # Remove from project contexts
+            if project_id in self.project_contexts:
+                del self.project_contexts[project_id]
+            # Clear current project file
+            current_file = self.path_manager.config_dir / "current"
+            if current_file.exists():
+                current_file.unlink()
+
     # Job Management
 
     def run_stage(self, stage: Optional[str] = None) -> Optional[int]:

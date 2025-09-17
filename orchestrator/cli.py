@@ -766,6 +766,30 @@ def approve(ctx, approval_id, decision, reason, actor):
         sys.exit(1)
 
 
+
+
+
+@cli.command()
+@click.argument('project_name')
+@click.confirmation_option(prompt='Are you sure you want to delete this project and all its data?')
+@pass_context
+def delete(ctx, project_name):
+    """Delete a project and all its associated data."""
+    ctx.ensure_initialized()
+    try:
+        console.print(f"Deleting project '{project_name}'...")
+        ctx.orchestrator.delete_project(project_name)
+        console.print(f"[green]✓[/green] Project '{project_name}' deleted successfully.")
+    except ValueError as e:
+        console.print(f"[red]Error:[/red] {e}")
+        sys.exit(1)
+    except Exception as e:
+        console.print(f"[red]Failed to delete project:[/red] {e}")
+        if ctx.verbose:
+            console.print_exception()
+        sys.exit(1)
+
+
 def main():
     """Main entry point for the CLI."""
     try:

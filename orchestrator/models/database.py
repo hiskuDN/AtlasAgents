@@ -224,6 +224,14 @@ class Database:
             cursor.execute("SELECT * FROM projects ORDER BY updated_at DESC")
             return [dict(row) for row in cursor.fetchall()]
 
+    def delete_project(self, project_id: int):
+        """Delete a project and all its related data."""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            # This will cascade delete related jobs, approvals, etc.
+            cursor.execute("DELETE FROM projects WHERE id = ?", (project_id,))
+            conn.commit()
+
     # Job operations
     def create_job(self, project_id: int, stage: str, agent: str) -> int:
         """Create a new job."""
@@ -399,3 +407,10 @@ class Database:
                 (job_id, path, artifact_type, sha)
             )
             return cursor.lastrowid
+
+    def execute_query(self, query: str) -> List[Dict]:
+        """Execute a raw SQL query."""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(query)
+            return [dict(row) for row in cursor.fetchall()]
