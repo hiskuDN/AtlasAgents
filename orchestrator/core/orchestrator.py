@@ -16,6 +16,7 @@ from orchestrator.core.state_machine import StateMachine, StateContext
 from orchestrator.core.job_manager import JobManager, JobExecutor
 from orchestrator.core.config import AtlasConfig, get_config
 from orchestrator.utils.paths import PathManager, get_path_manager
+from orchestrator.mcp.manager import MCPManager, SimpleMCPManager
 
 
 logger = logging.getLogger(__name__)
@@ -91,13 +92,20 @@ class Orchestrator:
     """Main orchestrator that coordinates all components."""
 
     def __init__(self, config: Optional[AtlasConfig] = None,
-                 db_path: Optional[Path] = None):
+                 db_path: Optional[Path] = None,
+                 use_mock_mcp: bool = True):
         # Configuration
         self.config = config or get_config()
         self.path_manager = get_path_manager()
 
         # Database
         self.db = Database(db_path)
+
+        # MCP Manager (use mock for testing)
+        if use_mock_mcp:
+            self.mcp_manager = SimpleMCPManager()
+        else:
+            self.mcp_manager = MCPManager(self.config, self.path_manager)
 
         # Core components
         self.state_machine = StateMachine(self.db)
@@ -212,6 +220,9 @@ class Orchestrator:
         # Update MCP paths for the project
         config_path = Path.cwd() / "atlas.config.yaml"
         self.path_manager.update_mcp_paths(name, config_path)
+
+        # Restart MCP manager with new project context
+        self.mcp_manager.restart_for_project(name)
 
         # Load or create project context
         if project['id'] not in self.project_contexts:
@@ -420,6 +431,9 @@ class Orchestrator:
 
         # Stop job manager
         self.job_manager.stop()
+
+        # Stop MCP manager
+        self.mcp_manager.stop()
 
         # Save any pending state
         for context in self.project_contexts.values():

@@ -325,6 +325,13 @@ def config(ctx):
     pass
 
 
+@cli.group()
+@pass_context
+def mcp(ctx):
+    """Manage MCP connections."""
+    pass
+
+
 @config.command('show')
 @click.option('--format', '-f', type=click.Choice(['json', 'yaml']), default='json')
 @pass_context
@@ -389,6 +396,117 @@ def config_set(ctx, key, value):
 
     except Exception as e:
         console.print(f"[red]Failed to set config:[/red] {e}")
+        if ctx.verbose:
+            console.print_exception()
+        sys.exit(1)
+
+
+@mcp.command('status')
+@pass_context
+def mcp_status(ctx):
+    """Show MCP server status."""
+    ctx.ensure_initialized()
+
+    try:
+        status = ctx.orchestrator.mcp_manager.get_server_status()
+
+        console.print(Panel.fit(
+            f"[bold]MCP Status[/bold]\n"
+            f"Running: {'[green]Yes[/green]' if status['running'] else '[red]No[/red]'}",
+            border_style="blue"
+        ))
+
+        if status['servers']:
+            table = Table(title="MCP Servers", show_header=True)
+            table.add_column("Server", style="cyan")
+            table.add_column("Transport", style="yellow")
+            table.add_column("Enabled", style="green")
+            table.add_column("Connected", style="magenta")
+
+            for server_name, server_info in status['servers'].items():
+                table.add_row(
+                    server_name,
+                    server_info['transport'],
+                    "✓" if server_info['enabled'] else "✗",
+                    "✓" if server_info['connected'] else "✗"
+                )
+
+            console.print(table)
+
+    except Exception as e:
+        console.print(f"[red]Failed to get MCP status:[/red] {e}")
+        sys.exit(1)
+
+
+@mcp.command('tools')
+@click.option('--server', '-s', help='Filter by server name')
+@pass_context
+def mcp_tools(ctx, server):
+    """List available MCP tools."""
+    ctx.ensure_initialized()
+
+    try:
+        tools = ctx.orchestrator.mcp_manager.list_tools()
+
+        if not tools:
+            console.print("[yellow]No tools available[/yellow]")
+            return
+
+        # Filter by server if specified
+        if server:
+            tools = {k: v for k, v in tools.items() if k.startswith(f"{server}.")}
+
+        table = Table(title="Available MCP Tools", show_header=True)
+        table.add_column("Tool ID", style="cyan")
+        table.add_column("Description", style="white")
+
+        for tool_id, tool_info in tools.items():
+            description = tool_info.get('description', 'No description')
+            if len(description) > 60:
+                description = description[:57] + "..."
+            table.add_row(tool_id, description)
+
+        console.print(table)
+        console.print(f"\n[dim]Total tools: {len(tools)}[/dim]")
+
+    except Exception as e:
+        console.print(f"[red]Failed to list tools:[/red] {e}")
+        sys.exit(1)
+
+
+@mcp.command('test')
+@click.argument('tool_id')
+@click.option('--args', '-a', help='Tool arguments as JSON')
+@pass_context
+def mcp_test(ctx, tool_id, args):
+    """Test an MCP tool."""
+    ctx.ensure_initialized()
+
+    try:
+        # Parse arguments
+        tool_args = {}
+        if args:
+            try:
+                tool_args = json.loads(args)
+            except json.JSONDecodeError:
+                console.print("[red]Error:[/red] Invalid JSON for arguments")
+                sys.exit(1)
+
+        console.print(f"[bold]Testing tool:[/bold] {tool_id}")
+        console.print(f"[dim]Arguments:[/dim] {tool_args}")
+
+        with console.status("[bold green]Executing tool..."):
+            result = ctx.orchestrator.mcp_manager.call_tool(tool_id, tool_args)
+
+        console.print("\n[bold green]Result:[/bold]")
+        if isinstance(result, dict):
+            syntax = Syntax(json.dumps(result, indent=2), "json", theme="monokai")
+            console.print(syntax)
+        else:
+            console.print(result)
+
+    except Exception as e:
+        console.print(f"[red]Tool execution failed:[/red] {e}")
         if ctx.verbose:
             console.print_exception()
         sys.exit(1)
