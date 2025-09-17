@@ -4,17 +4,18 @@ from typing import Dict, Type, Optional, Any
 import logging
 
 from .base import BaseAgent, AgentRole
-from .mock_agents import (
-    MockPlannerAgent,
-    MockSpecWriterAgent,
-    MockCoderAgent,
-    MockReviewerAgent
+from .base_sync import SyncBaseAgent
+from .mock_agents_sync import (
+    SyncMockPlannerAgent,
+    SyncMockSpecWriterAgent,
+    SyncMockCoderAgent,
+    SyncMockReviewerAgent
 )
-from .llm_agents import (
-    LLMPlannerAgent,
-    LLMSpecWriterAgent,
-    LLMCoderAgent,
-    LLMReviewerAgent
+from .llm_agents_sync import (
+    SyncLLMPlannerAgent,
+    SyncLLMSpecWriterAgent,
+    SyncLLMCoderAgent,
+    SyncLLMReviewerAgent
 )
 from ..core.state_machine import JobStage
 from ..llm.model_router import ModelConfig, ModelProvider
@@ -40,19 +41,19 @@ class AgentRegistry:
     def _register_default_agents(self):
         """Register the default agents."""
         if self.use_llm:
-            # Register LLM agents
-            self.register(AgentRole.PLANNER, LLMPlannerAgent)
-            self.register(AgentRole.SPEC_WRITER, LLMSpecWriterAgent)
-            self.register(AgentRole.CODER, LLMCoderAgent)
-            self.register(AgentRole.REVIEWER, LLMReviewerAgent)
-            logger.info("Registered LLM agents")
+            # Register synchronous LLM agents
+            self.register(AgentRole.PLANNER, SyncLLMPlannerAgent)
+            self.register(AgentRole.SPEC_WRITER, SyncLLMSpecWriterAgent)
+            self.register(AgentRole.CODER, SyncLLMCoderAgent)
+            self.register(AgentRole.REVIEWER, SyncLLMReviewerAgent)
+            logger.info("Registered LLM agents (synchronous)")
         else:
-            # Register mock agents
-            self.register(AgentRole.PLANNER, MockPlannerAgent)
-            self.register(AgentRole.SPEC_WRITER, MockSpecWriterAgent)
-            self.register(AgentRole.CODER, MockCoderAgent)
-            self.register(AgentRole.REVIEWER, MockReviewerAgent)
-            logger.info("Registered mock agents")
+            # Register synchronous mock agents
+            self.register(AgentRole.PLANNER, SyncMockPlannerAgent)
+            self.register(AgentRole.SPEC_WRITER, SyncMockSpecWriterAgent)
+            self.register(AgentRole.CODER, SyncMockCoderAgent)
+            self.register(AgentRole.REVIEWER, SyncMockReviewerAgent)
+            logger.info("Registered mock agents (synchronous)")
 
     def _setup_stage_mapping(self):
         """Set up the mapping from job stages to agent roles."""
@@ -70,8 +71,9 @@ class AgentRegistry:
             role: The agent role
             agent_class: The agent class to register
         """
-        if not issubclass(agent_class, BaseAgent):
-            raise ValueError(f"{agent_class} must be a subclass of BaseAgent")
+        # Accept both BaseAgent and SyncBaseAgent
+        if not (issubclass(agent_class, BaseAgent) or issubclass(agent_class, SyncBaseAgent)):
+            raise ValueError(f"{agent_class} must be a subclass of BaseAgent or SyncBaseAgent")
         self._agents[role] = agent_class
         logger.info(f"Registered agent {agent_class.__name__} for role {role.value}")
 
@@ -212,11 +214,11 @@ class AgentFactory:
         """
         self._config[role] = config
 
-    async def cleanup_all(self):
+    def cleanup_all(self):
         """Clean up all cached agent instances."""
         for agent in self._instances.values():
             try:
-                await agent.cleanup()
+                agent.cleanup()
             except Exception as e:
                 logger.error(f"Failed to cleanup agent {agent.name}: {e}")
         self._instances.clear()

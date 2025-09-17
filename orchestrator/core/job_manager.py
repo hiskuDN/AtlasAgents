@@ -1,6 +1,5 @@
 """Job management system for orchestrating agent tasks."""
 
-import asyncio
 import json
 from pathlib import Path
 from typing import Dict, List, Optional, Any, Callable
@@ -52,20 +51,26 @@ class JobExecutor:
         try:
             # Update job status
             self.db.update_job(task.job_id, status="running")
+            logger.debug(f"Updated job {task.job_id} status to running")
 
             # Get input artifacts for the agent
             input_data = self._prepare_input(task)
+            logger.debug(f"Prepared input data for job {task.job_id}")
 
             # Execute with the appropriate agent
             agent = self.agent_factory.create_agent_for_stage(task.stage)
             if agent:
-                # Run async agent execution in sync context
-                result = asyncio.run(self._execute_agent(agent, task, input_data))
+                logger.info(f"Created agent {agent.__class__.__name__} for job {task.job_id}")
+                # Execute agent directly (synchronously)
+                result = self._execute_agent(agent, task, input_data)
+                logger.debug(f"Agent execution completed for job {task.job_id}")
             else:
+                logger.warning(f"No agent available for stage {task.stage}, using mock execution")
                 # Fallback to mock execution
                 result = self._mock_execute(task, input_data)
 
             # Store output artifacts
+            logger.debug(f"Storing outputs for job {task.job_id}")
             output_refs = self._store_outputs(task, result)
 
             # Update job with results
@@ -84,6 +89,7 @@ class JobExecutor:
 
         except Exception as e:
             logger.error(f"Job {task.job_id} failed: {str(e)}")
+            logger.error(f"Exception details:", exc_info=True)
             self.db.update_job(task.job_id, status="failed")
 
             return {
@@ -91,51 +97,74 @@ class JobExecutor:
                 "error": str(e)
             }
 
-    async def _execute_agent(self, agent, task: JobTask, input_data: Dict[str, Any]) -> Dict[str, Any]:
-        """Execute an agent asynchronously."""
-        # Build agent context
-        context = AgentContext(
-            project_id=task.project_id,
-            job_id=task.job_id,
-            stage=task.stage.value,
-            workspace_path=input_data['workspace_path'],
-            artifacts=input_data.get('artifacts', {}),
-            files=input_data.get('files', {}),
-            config=input_data.get('config', {}),
-            metadata=task.metadata
-        )
-
-        # Build agent request
-        request = AgentRequest(
-            context=context,
-            prompt=input_data.get('prompt', f"Execute {task.stage.value} stage for project")
-        )
-
-        # Initialize agent if needed
-        await agent.initialize()
-
+    def _execute_agent(self, agent, task: JobTask, input_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Execute an agent synchronously."""
+        logger.info(f"Starting agent execution for job {task.job_id}")
+        
         try:
-            # Execute the agent
-            response = await agent.execute(request)
+            # Build agent context
+            context = AgentContext(
+                project_id=task.project_id,
+                job_id=task.job_id,
+                stage=task.stage.value,
+                workspace_path=input_data['workspace_path'],
+                artifacts=input_data.get('artifacts', {}),
+                files=input_data.get('files', {}),
+                config=input_data.get('config', {}),
+                metadata=task.metadata
+            )
+            logger.debug(f"Built agent context for job {task.job_id}")
 
-            if response.success:
-                # Convert agent response to expected format
-                result = {
-                    'status': 'success',
-                    **response.artifacts
-                }
+            # Build agent request
+            request = AgentRequest(
+                context=context,
+                prompt=input_data.get('prompt', f"Execute {task.stage.value} stage for project")
+            )
+            logger.debug(f"Built agent request for job {task.job_id}")
 
-                # Add metadata
-                if response.metadata:
-                    result['metadata'] = response.metadata
+            # Initialize agent if needed
+            logger.debug(f"Initializing agent for job {task.job_id}")
+            agent.initialize()
 
-                return result
-            else:
-                raise Exception(f"Agent execution failed: {response.error}")
+            try:
+                # Execute the agent
+                logger.info(f"Executing agent for job {task.job_id}")
+                response = agent.execute(request)
+                logger.debug(f"Agent execution completed for job {task.job_id}, success: {response.success}")
 
-        finally:
-            # Cleanup agent resources
-            await agent.cleanup()
+                if response.success:
+                    # Convert agent response to expected format
+                    result = {
+                        'status': 'success',
+                        **response.artifacts
+                    }
+
+                    # Add metadata
+                    if response.metadata:
+                        result['metadata'] = response.metadata
+
+                    logger.info(f"Agent execution successful for job {task.job_id}")
+                    return result
+                else:
+                    error_msg = f"Agent execution failed: {response.error}"
+                    logger.error(error_msg)
+                    raise Exception(error_msg)
+
+            finally:
+                # Cleanup agent resources
+                logger.debug(f"Cleaning up agent for job {task.job_id}")
+                agent.cleanup()
+                
+        except ImportError as e:
+            error_msg = f"Import error during agent execution: {str(e)}"
+            logger.error(error_msg)
+            logger.error("This may be due to circular imports or missing dependencies", exc_info=True)
+            raise Exception(error_msg)
+        except Exception as e:
+            error_msg = f"Error during agent execution: {str(e)}"
+            logger.error(error_msg)
+            logger.error("Full exception details:", exc_info=True)
+            raise
 
     def _prepare_input(self, task: JobTask) -> Dict[str, Any]:
         """Prepare input data for an agent based on the stage."""
@@ -321,38 +350,52 @@ class JobManager:
 
     def _worker_loop(self):
         """Main worker loop for processing jobs."""
+        from queue import Empty
+        
         while not self._stop_event.is_set():
             try:
                 # Get next job with timeout to allow checking stop event
                 task = self.job_queue.get(timeout=1)
-
-                # Check if project already has an active job
-                if task.project_id in self.active_jobs:
-                    # Re-queue with lower priority
-                    task.priority += 10
-                    self.job_queue.put(task)
-                    continue
-
-                # Mark as active
-                self.active_jobs[task.project_id] = task
-
-                # Execute the job
-                try:
-                    result = self.executor.execute(task)
-
-                    # Handle result
-                    if result["status"] == "success":
-                        self._handle_success(task, result)
-                    else:
-                        self._handle_failure(task, result)
-
-                finally:
-                    # Remove from active jobs
-                    self.active_jobs.pop(task.project_id, None)
-
-            except:
+            except Empty:
                 # Queue is empty, continue
                 continue
+            except Exception as e:
+                logger.error(f"Error getting task from queue: {e}")
+                continue
+
+            # Check if project already has an active job
+            if task.project_id in self.active_jobs:
+                # Re-queue with lower priority
+                task.priority += 10
+                self.job_queue.put(task)
+                continue
+
+            # Mark as active
+            self.active_jobs[task.project_id] = task
+
+            # Execute the job
+            try:
+                result = self.executor.execute(task)
+
+                # Handle result
+                if result["status"] == "success":
+                    self._handle_success(task, result)
+                else:
+                    self._handle_failure(task, result)
+
+            except Exception as e:
+                logger.error(f"Unexpected error executing job {task.job_id}: {e}")
+                logger.error(f"Exception details:", exc_info=True)
+                
+                # Create a failure result and handle it
+                result = {
+                    "status": "failed",
+                    "error": f"Unexpected error: {str(e)}"
+                }
+                self._handle_failure(task, result)
+            finally:
+                # Remove from active jobs
+                self.active_jobs.pop(task.project_id, None)
 
     def _handle_success(self, task: JobTask, result: Dict):
         """Handle successful job completion."""

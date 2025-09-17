@@ -33,9 +33,17 @@ class CLIContext:
     def initialize(self, verbose: bool = False):
         """Initialize the CLI context."""
         self.verbose = verbose
-        if verbose:
-            import logging
-            logging.basicConfig(level=logging.DEBUG)
+
+        # Setup proper structured logging
+        from orchestrator.utils.logging import setup_logging
+        log_level = "DEBUG" if verbose else "INFO"
+
+        # Try to get current project name if available
+        project_name = None
+        if self.orchestrator and hasattr(self.orchestrator, 'current_project'):
+            project_name = self.orchestrator.current_project.get('name')
+
+        setup_logging(log_level=log_level, project_name=project_name)
 
         self.config = get_config()
         self.orchestrator = Orchestrator(self.config)
@@ -733,8 +741,16 @@ def approve(ctx, approval_id, decision, reason, actor):
     ctx.ensure_initialized()
 
     try:
+        # Map CLI decision to enum value
+        decision_map = {
+            'approve': 'approved',
+            'revise': 'revise',
+            'stop': 'stopped'
+        }
+        enum_decision = decision_map.get(decision, decision)
+
         success = ctx.orchestrator.handle_approval(
-            approval_id, decision, actor, reason
+            approval_id, enum_decision, actor, reason
         )
 
         if success:

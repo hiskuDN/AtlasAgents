@@ -8,6 +8,7 @@ import structlog
 from structlog.types import Processor
 from datetime import datetime
 import json
+from logging.handlers import RotatingFileHandler
 
 
 def add_timestamp(_, __, event_dict: Dict[str, Any]) -> Dict[str, Any]:
@@ -50,10 +51,12 @@ def censor_sensitive(_, __, event_dict: Dict[str, Any]) -> Dict[str, Any]:
 class LogManager:
     """Manages logging configuration for AtlasAgents."""
 
-    def __init__(self, log_dir: Optional[Path] = None, log_level: str = "INFO"):
+    def __init__(self, log_dir: Optional[Path] = None, log_level: str = "INFO",
+                 project_name: Optional[str] = None):
         self.log_dir = log_dir or Path.home() / ".atlas" / "logs"
         self.log_dir.mkdir(parents=True, exist_ok=True)
         self.log_level = getattr(logging, log_level.upper())
+        self.project_name = project_name
         self._configure_structlog()
         self._configure_standard_logging()
 
@@ -95,18 +98,31 @@ class LogManager:
             level=self.log_level,
         )
 
-        # Add file handler for persistent logs
-        file_handler = logging.FileHandler(
-            self.log_dir / f"atlas_{datetime.now().strftime('%Y%m%d')}.log"
+        # Add rotating file handler for main atlas logs
+        main_log_file = self.log_dir / "atlas.log"
+        main_handler = RotatingFileHandler(
+            main_log_file,
+            maxBytes=10 * 1024 * 1024,  # 10 MB
+            backupCount=5
         )
-        file_handler.setLevel(self.log_level)
+        main_handler.setLevel(self.log_level)
+        main_handler.setFormatter(logging.Formatter('%(message)s'))
+        logging.getLogger().addHandler(main_handler)
 
-        # JSON formatter for file logs
-        file_handler.setFormatter(
-            logging.Formatter('%(message)s')
-        )
+        # Add project-specific log if project name is provided
+        if self.project_name:
+            project_log_dir = self.log_dir / "projects" / self.project_name
+            project_log_dir.mkdir(parents=True, exist_ok=True)
+            project_log_file = project_log_dir / f"{self.project_name}.log"
 
-        logging.getLogger().addHandler(file_handler)
+            project_handler = RotatingFileHandler(
+                project_log_file,
+                maxBytes=5 * 1024 * 1024,  # 5 MB
+                backupCount=3
+            )
+            project_handler.setLevel(self.log_level)
+            project_handler.setFormatter(logging.Formatter('%(message)s'))
+            logging.getLogger().addHandler(project_handler)
 
     def get_logger(self, name: str) -> structlog.BoundLogger:
         """Get a logger instance."""
@@ -120,16 +136,32 @@ class LogManager:
         """Clear context variables."""
         structlog.contextvars.clear_contextvars()
 
+    def add_workspace_logging(self, workspace_path: Path):
+        """Add logging to a specific workspace."""
+        workspace_log_dir = workspace_path / ".logs"
+        workspace_log_dir.mkdir(exist_ok=True)
+
+        workspace_log_file = workspace_log_dir / f"atlas_{datetime.now().strftime('%Y%m%d')}.log"
+        workspace_handler = RotatingFileHandler(
+            workspace_log_file,
+            maxBytes=5 * 1024 * 1024,  # 5 MB
+            backupCount=3
+        )
+        workspace_handler.setLevel(self.log_level)
+        workspace_handler.setFormatter(logging.Formatter('%(message)s'))
+        logging.getLogger().addHandler(workspace_handler)
+
 
 # Global log manager instance
 _log_manager: Optional[LogManager] = None
 
 
-def setup_logging(log_dir: Optional[Path] = None, log_level: str = "INFO") -> LogManager:
+def setup_logging(log_dir: Optional[Path] = None, log_level: str = "INFO",
+                  project_name: Optional[str] = None) -> LogManager:
     """Setup logging for the application."""
     global _log_manager
     if _log_manager is None:
-        _log_manager = LogManager(log_dir, log_level)
+        _log_manager = LogManager(log_dir, log_level, project_name)
     return _log_manager
 
 
@@ -138,3 +170,10 @@ def get_logger(name: str) -> structlog.BoundLogger:
     if _log_manager is None:
         setup_logging()
     return _log_manager.get_logger(name)
+
+
+def add_workspace_logging(workspace_path: Path):
+    """Add workspace-specific logging."""
+    if _log_manager is None:
+        setup_logging()
+    _log_manager.add_workspace_logging(workspace_path)

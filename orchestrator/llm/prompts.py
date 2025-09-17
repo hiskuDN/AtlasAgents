@@ -1,36 +1,35 @@
 """Agent prompts for different roles."""
 
 from typing import Dict, Any
-from ..agents.base import AgentRole
 
 
 class AgentPrompts:
     """Manages prompts for different agent roles."""
 
     SYSTEM_PROMPTS = {
-        AgentRole.PLANNER: """You are a senior technical architect creating implementation plans.
+        "planner": """You are a senior technical architect creating implementation plans.
 Your role is to analyze requirements and create clear, actionable plans.
 Focus on practical implementation steps, identifying risks, and suggesting approaches.
 Output should be in markdown format with clear sections.""",
 
-        AgentRole.SPEC_WRITER: """You are a technical specification writer.
+        "spec_writer": """You are a technical specification writer.
 Your role is to take high-level plans and create detailed technical specifications.
 Include API designs, data models, architecture diagrams (as ASCII art), and acceptance criteria.
 Also create a structured list of implementation tasks in JSON format.""",
 
-        AgentRole.CODER: """You are an expert programmer implementing features based on specifications.
+        "coder": """You are an expert programmer implementing features based on specifications.
 Your role is to write clean, maintainable code following best practices.
 Focus on one task at a time, ensuring proper error handling and documentation.
 Describe the changes you're making and which files are affected.""",
 
-        AgentRole.REVIEWER: """You are a senior code reviewer.
+        "reviewer": """You are a senior code reviewer.
 Your role is to review code changes for quality, security, and best practices.
 Provide constructive feedback, identify potential issues, and suggest improvements.
 Also verify that the implementation meets the specifications."""
     }
 
     TASK_PROMPTS = {
-        AgentRole.PLANNER: """
+        "planner": """
 Given the following project context and requirements, create an implementation plan.
 
 Project: {project_name}
@@ -53,7 +52,7 @@ Please provide:
 Format your response as a markdown document with clear sections.
 """,
 
-        AgentRole.SPEC_WRITER: """
+        "spec_writer": """
 Based on the following plan, create detailed technical specifications.
 
 Project: {project_name}
@@ -78,7 +77,7 @@ Create two outputs:
 Start with the markdown spec, then provide the JSON tasks after a separator line "---TASKS---".
 """,
 
-        AgentRole.CODER: """
+        "coder": """
 Implement the following task based on the specifications.
 
 Project: {project_name}
@@ -105,7 +104,7 @@ Format your response as:
 Use markdown code blocks for code snippets.
 """,
 
-        AgentRole.REVIEWER: """
+        "reviewer": """
 Review the following code changes for quality and correctness.
 
 Project: {project_name}
@@ -128,29 +127,33 @@ Format as a markdown document with clear sections.
     }
 
     @classmethod
-    def get_system_prompt(cls, role: AgentRole) -> str:
+    def get_system_prompt(cls, role) -> str:
         """Get system prompt for a role.
 
         Args:
-            role: Agent role
+            role: Agent role (AgentRole enum or string)
 
         Returns:
             System prompt string
         """
-        return cls.SYSTEM_PROMPTS.get(role, "You are a helpful assistant.")
+        # Handle both AgentRole enum and string
+        role_str = role.value if hasattr(role, 'value') else str(role)
+        return cls.SYSTEM_PROMPTS.get(role_str, "You are a helpful assistant.")
 
     @classmethod
-    def get_task_prompt(cls, role: AgentRole, **kwargs) -> str:
+    def get_task_prompt(cls, role, **kwargs) -> str:
         """Get task prompt for a role.
 
         Args:
-            role: Agent role
+            role: Agent role (AgentRole enum or string)
             **kwargs: Variables to format into prompt
 
         Returns:
             Formatted task prompt
         """
-        template = cls.TASK_PROMPTS.get(role, "Complete the following task: {task}")
+        # Handle both AgentRole enum and string
+        role_str = role.value if hasattr(role, 'value') else str(role)
+        template = cls.TASK_PROMPTS.get(role_str, "Complete the following task: {task}")
 
         # Provide defaults for common variables
         defaults = {

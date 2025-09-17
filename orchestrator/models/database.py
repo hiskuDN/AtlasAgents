@@ -378,6 +378,17 @@ class Database:
             row = cursor.fetchone()
             return dict(row) if row else None
 
+    def get_approval(self, approval_id: int) -> Optional[Dict]:
+        """Get an approval by ID."""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT * FROM approvals WHERE id = ?",
+                (approval_id,)
+            )
+            row = cursor.fetchone()
+            return dict(row) if row else None
+
     # Artifact operations
     def create_artifact(self, job_id: int, path: str, artifact_type: str, sha: Optional[str] = None) -> int:
         """Create an artifact record."""

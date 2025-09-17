@@ -362,16 +362,19 @@ class Orchestrator:
     def handle_approval(self, approval_id: int, decision: str, actor: str,
                        reason: Optional[str] = None) -> bool:
         """Handle an approval decision."""
-        # Find the project and job for this approval
-        project_id = None
-        for pid, context in self.project_contexts.items():
-            if context.pending_approval_id == approval_id:
-                project_id = pid
-                break
-
-        if not project_id:
+        # Find the approval and associated job in the database
+        approval = self.db.get_approval(approval_id=approval_id)
+        if not approval:
             logger.error(f"Approval {approval_id} not found")
             return False
+
+        # Get the job to find the project
+        job = self.db.get_job(approval['job_id'])
+        if not job:
+            logger.error(f"Job {approval['job_id']} not found for approval {approval_id}")
+            return False
+
+        project_id = job['project_id']
 
         # Convert decision to enum
         try:

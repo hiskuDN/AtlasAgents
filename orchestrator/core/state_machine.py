@@ -225,13 +225,13 @@ class StateMachine:
         """
         context = self.get_context(project_id)
 
-        # Update approval record
-        self.db.create_approval(
-            job_id=context.job_id,
-            status=status.value,
-            actor=actor,
-            reason=reason
-        )
+        # Update the existing approval record
+        with self.db.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "UPDATE approvals SET status = ?, actor = ?, reason = ? WHERE id = ?",
+                (status.value, actor, reason, approval_id)
+            )
 
         # Clear pending approval
         context.pending_approval_id = None

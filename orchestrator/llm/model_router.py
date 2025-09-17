@@ -126,6 +126,9 @@ class ModelRouter:
         Returns:
             Generated text
         """
+        logger.info(f"Starting Ollama generation with model {model}")
+        logger.debug(f"Prompt length: {len(prompt)} chars")
+
         client = self.clients[ModelProvider.OLLAMA]
 
         messages = []
@@ -148,21 +151,33 @@ class ModelRouter:
             opts['num_predict'] = max_tokens
 
         try:
+            logger.info(f"Sending request to Ollama with model {model}")
+            
+            import time
+            start_time = time.time()
+            
             response = client.chat(
                 model=model,
                 messages=messages,
                 options=opts,
                 stream=stream
             )
+            
+            end_time = time.time()
+            logger.info(f"Ollama request completed in {end_time - start_time:.2f} seconds")
 
             if stream:
                 # Return generator for streaming
                 return (chunk['message']['content'] for chunk in response)
             else:
-                return response['message']['content']
+                result = response['message']['content']
+                logger.info(f"Generated {len(result)} characters")
+                return result
 
         except Exception as e:
             logger.error(f"Ollama generation failed: {e}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
             raise
 
     def list_models(self, provider: Optional[ModelProvider] = None) -> List[str]:
@@ -179,8 +194,9 @@ class ModelRouter:
         if provider == ModelProvider.OLLAMA:
             try:
                 client = self.clients[ModelProvider.OLLAMA]
-                models = client.list()
-                return [model['name'] for model in models.get('models', [])]
+                models_response = client.list()
+                # The ollama library returns model objects directly
+                return [model.model for model in models_response['models']]
             except Exception as e:
                 logger.error(f"Failed to list Ollama models: {e}")
                 return []
