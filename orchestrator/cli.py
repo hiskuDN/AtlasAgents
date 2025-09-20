@@ -11,12 +11,16 @@ from rich.panel import Panel
 from rich.syntax import Syntax
 from rich.progress import Progress, SpinnerColumn, TextColumn
 import time
+from dotenv import load_dotenv
 
 from orchestrator.core.orchestrator import Orchestrator, OrchestratorEvent
 from orchestrator.core.config import AtlasConfig, get_config
 from orchestrator.models.database import JobStage, ApprovalStatus
 from orchestrator.utils.paths import get_path_manager
 from orchestrator import __version__
+
+# Load environment variables from .env file
+load_dotenv()
 
 
 console = Console()

@@ -1,5 +1,6 @@
 """Model router for LLM integration."""
 
+import os
 import json
 from typing import Dict, Any, Optional, List
 from enum import Enum
@@ -45,7 +46,9 @@ class ModelRouter:
         """Initialize available LLM clients."""
         # Initialize Ollama client
         try:
-            self.clients[ModelProvider.OLLAMA] = ollama.Client()
+            # Get Ollama host from environment variable or use default
+            ollama_host = os.environ.get('OLLAMA_HOST', 'http://localhost:11434')
+            self.clients[ModelProvider.OLLAMA] = ollama.Client(host=ollama_host)
             # Test connection
             self.clients[ModelProvider.OLLAMA].list()
             logger.info("Ollama client initialized successfully")
