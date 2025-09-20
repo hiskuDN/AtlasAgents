@@ -244,14 +244,32 @@ def run(ctx, stage, priority, llm):
                 ) as progress:
                     task = progress.add_task(f"Running {stage_name}...", total=None)
 
-                    # Poll for status (in real implementation, would use events)
-                    for _ in range(10):
+                    # Poll for status until job completes
+                    max_wait = 600  # 10 minutes max
+                    for i in range(max_wait):
                         time.sleep(1)
-                        status = ctx.orchestrator.get_status()
-                        if status['project'].get('pending_approvals'):
+
+                        # Check job status
+                        job = ctx.orchestrator.db.get_job(job_id)
+                        if job and job['status'] in ['completed', 'failed']:
                             progress.stop()
-                            console.print("[yellow]⚠[/yellow] Approval required")
-                            console.print("Check Telegram for approval request")
+                            if job['status'] == 'completed':
+                                console.print(f"[green]✓[/green] {stage_name} completed successfully")
+
+                                # Check for approvals
+                                status = ctx.orchestrator.get_status()
+                                if status['project'].get('pending_approvals'):
+                                    console.print("[yellow]⚠[/yellow] Approval required")
+                                    console.print("Check Telegram for approval request")
+                            else:
+                                console.print(f"[red]✗[/red] {stage_name} failed")
+                            break
+
+                        # Timeout check
+                        if i >= max_wait - 1:
+                            progress.stop()
+                            console.print(f"[yellow]⚠[/yellow] {stage_name} is taking longer than expected")
+                            console.print("Job is still running in background")
                             break
         else:
             console.print(f"[red]Error:[/red] Failed to start {stage_name}")

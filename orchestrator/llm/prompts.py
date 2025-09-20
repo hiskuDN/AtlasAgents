@@ -53,7 +53,7 @@ Format your response as a markdown document with clear sections.
 """,
 
         "spec_writer": """
-Based on the following plan, create detailed technical specifications.
+Based on the following plan, create a technical specification.
 
 Project: {project_name}
 Plan:
@@ -62,19 +62,13 @@ Plan:
 Additional Context:
 {context}
 
-Please provide:
-1. Technical requirements
-2. Architecture design (include ASCII diagrams if helpful)
-3. API specifications (if applicable)
-4. Data models and schemas
-5. Implementation tasks as a JSON array with this structure:
-   [{{"id": "task-1", "title": "...", "description": "...", "priority": "high|medium|low", "estimated_hours": N}}]
+Please provide a concise specification with:
+1. Technical requirements (brief bullet points)
+2. Key components and their responsibilities
+3. Main implementation steps (5-7 steps max)
 
-Create two outputs:
-1. A markdown specification document
-2. A JSON tasks list
-
-Start with the markdown spec, then provide the JSON tasks after a separator line "---TASKS---".
+Keep the response focused and under 1500 words.
+Format as markdown with clear sections.
 """,
 
         "coder": """

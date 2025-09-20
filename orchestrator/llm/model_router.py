@@ -48,9 +48,20 @@ class ModelRouter:
         try:
             # Get Ollama host from environment variable or use default
             ollama_host = os.environ.get('OLLAMA_HOST', 'http://localhost:11434')
-            self.clients[ModelProvider.OLLAMA] = ollama.Client(host=ollama_host)
-            # Test connection
-            self.clients[ModelProvider.OLLAMA].list()
+            # Create client with timeout
+            import httpx
+            timeout = httpx.Timeout(
+                timeout=300.0,  # 5 minutes total timeout
+                connect=10.0,   # 10 seconds to connect
+                read=60.0       # 60 seconds per read chunk
+            )
+            self.clients[ModelProvider.OLLAMA] = ollama.Client(
+                host=ollama_host,
+                timeout=timeout
+            )
+            # Test connection with short timeout
+            test_client = ollama.Client(host=ollama_host, timeout=5.0)
+            test_client.list()
             logger.info("Ollama client initialized successfully")
         except Exception as e:
             logger.warning(f"Failed to initialize Ollama client: {e}")
@@ -129,8 +140,6 @@ class ModelRouter:
         Returns:
             Generated text
         """
-        logger.info(f"Starting Ollama generation with model {model}")
-        logger.debug(f"Prompt length: {len(prompt)} chars")
 
         client = self.clients[ModelProvider.OLLAMA]
 
@@ -154,34 +163,72 @@ class ModelRouter:
             opts['num_predict'] = max_tokens
 
         try:
-            logger.info(f"Sending request to Ollama with model {model}")
-            
+
             import time
             start_time = time.time()
-            
-            response = client.chat(
-                model=model,
-                messages=messages,
-                options=opts,
-                stream=stream
-            )
-            
-            end_time = time.time()
-            logger.info(f"Ollama request completed in {end_time - start_time:.2f} seconds")
 
-            if stream:
-                # Return generator for streaming
-                return (chunk['message']['content'] for chunk in response)
+            # For long prompts, use streaming to avoid timeout
+            use_stream = stream or len(prompt) > 1000
+
+            if use_stream:
+                response = client.chat(
+                    model=model,
+                    messages=messages,
+                    options=opts,
+                    stream=True
+                )
+
+                # Collect streamed response with size limit
+                full_response = []
+                chunk_count = 0
+                total_chars = 0
+                max_response_chars = 10000  # Maximum 10k characters
+
+                for chunk in response:
+                    if 'message' in chunk and 'content' in chunk['message']:
+                        content = chunk['message']['content']
+                        full_response.append(content)
+                        chunk_count += 1
+                        total_chars += len(content)
+
+
+                        # Early termination if response is too long
+                        if total_chars > max_response_chars:
+                            logger.warning(f"Response exceeded {max_response_chars} chars, terminating early at {total_chars} chars")
+                            full_response.append("\n\n[Response truncated due to length limit]")
+                            break
+
+                        # Also check time limit
+                        if time.time() - start_time > 120:  # 2 minutes max
+                            logger.warning(f"Response generation exceeded 2 minutes, terminating")
+                            full_response.append("\n\n[Response truncated due to time limit]")
+                            break
+
+                result = ''.join(full_response)
+                return result
             else:
+                response = client.chat(
+                    model=model,
+                    messages=messages,
+                    options=opts,
+                    stream=False
+                )
+
                 result = response['message']['content']
-                logger.info(f"Generated {len(result)} characters")
                 return result
 
         except Exception as e:
             logger.error(f"Ollama generation failed: {e}")
             import traceback
             logger.error(f"Traceback: {traceback.format_exc()}")
-            raise
+
+            # Check for specific error types
+            if "timeout" in str(e).lower():
+                raise TimeoutError(f"LLM request timed out: {e}")
+            elif "connection" in str(e).lower():
+                raise ConnectionError(f"Failed to connect to Ollama: {e}")
+            else:
+                raise RuntimeError(f"LLM generation failed: {e}")
 
     def list_models(self, provider: Optional[ModelProvider] = None) -> List[str]:
         """List available models.

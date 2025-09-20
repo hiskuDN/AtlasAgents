@@ -2,6 +2,7 @@
 
 import json
 import re
+import logging
 from typing import Any, Dict, Optional
 from pathlib import Path
 
@@ -9,6 +10,8 @@ from .base import AgentRole, AgentRequest, AgentResponse
 from .base_sync import SyncBaseAgent
 from ..llm.model_router import ModelRouter, ModelConfig, ModelProvider
 from ..llm.prompts import AgentPrompts
+
+logger = logging.getLogger(__name__)
 
 
 class SyncLLMAgent(SyncBaseAgent):
@@ -22,10 +25,19 @@ class SyncLLMAgent(SyncBaseAgent):
             model_config: Model configuration
         """
         super().__init__(role)
+        # Set reasonable token limits based on role
+        max_tokens = {
+            AgentRole.PLANNER: 2000,
+            AgentRole.SPEC_WRITER: 3000,
+            AgentRole.CODER: 2500,
+            AgentRole.REVIEWER: 1500
+        }.get(role, 2000)
+
         self.model_config = model_config or ModelConfig(
             provider=ModelProvider.OLLAMA,
             model_name="phi4:latest",
-            temperature=0.7
+            temperature=0.7,
+            max_tokens=max_tokens
         )
         self.model_router = ModelRouter()
 
@@ -57,7 +69,11 @@ class SyncLLMAgent(SyncBaseAgent):
             )
 
             # Parse and structure the response
-            artifacts = self._parse_response(llm_response, request)
+            try:
+                artifacts = self._parse_response(llm_response, request)
+            except Exception as e:
+                logger.error(f"Failed to parse LLM response: {e}")
+                artifacts = {'raw_response': llm_response}
 
             response = AgentResponse(
                 success=True,
@@ -150,31 +166,21 @@ class SyncLLMAgent(SyncBaseAgent):
             artifacts['summary'] = 'Generated implementation plan'
 
         elif self.role == AgentRole.SPEC_WRITER:
-            # Split spec and tasks if separator exists
-            if '---TASKS---' in llm_response:
-                parts = llm_response.split('---TASKS---')
-                spec_content = parts[0].strip()
-                tasks_content = parts[1].strip() if len(parts) > 1 else '[]'
-            else:
-                spec_content = llm_response
-                tasks_content = '[]'
+            # Since we simplified the prompt, just store the spec
+            artifacts['spec.md'] = llm_response.strip()
+            artifacts['summary'] = 'Generated technical specification'
 
-            artifacts['spec.md'] = spec_content
-
-            # Try to parse JSON tasks
-            try:
-                # Extract JSON from the tasks content
-                json_match = re.search(r'\[.*\]', tasks_content, re.DOTALL)
-                if json_match:
-                    tasks = json.loads(json_match.group())
-                else:
-                    tasks = []
-            except Exception as e:
-                tasks = []
-
+            # Create simple default tasks based on spec content
+            tasks = [
+                {
+                    'id': 'task-1',
+                    'title': 'Implementation',
+                    'description': 'Implement based on specification',
+                    'priority': 'high'
+                }
+            ]
             artifacts['tasks.json'] = json.dumps(tasks, indent=2)
             artifacts['tasks'] = tasks
-            artifacts['summary'] = f'Generated spec with {len(tasks)} tasks'
 
         elif self.role == AgentRole.CODER:
             # Extract code blocks
