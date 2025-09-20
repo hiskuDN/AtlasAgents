@@ -256,18 +256,54 @@ class JobExecutor:
                 )
 
         elif task.stage == JobStage.CODE:
-            # Store code changes
-            if "code_changes" in result:
+            # Write actual code files
+            if "code_changes" in result and isinstance(result["code_changes"], dict):
+                src_dir = project_dir / "src"
+                src_dir.mkdir(parents=True, exist_ok=True)
+
+                files_written = []
+                for filepath, code in result["code_changes"].items():
+                    # Ensure the filepath is relative and safe
+                    if filepath.startswith('/'):
+                        filepath = filepath[1:]
+                    if '..' in filepath:
+                        continue  # Skip potentially dangerous paths
+
+                    # Determine target path
+                    if '/' in filepath:
+                        # If path includes subdirectory
+                        file_path = src_dir / filepath
+                    else:
+                        # Place directly in src
+                        file_path = src_dir / filepath
+
+                    # Create parent directories if needed
+                    file_path.parent.mkdir(parents=True, exist_ok=True)
+
+                    # Write the code file
+                    file_path.write_text(code)
+                    files_written.append(str(file_path))
+                    logger.debug(f"Wrote code file: {file_path}")
+
+                    # Create artifact record
+                    self.db.create_artifact(
+                        job_id=task.job_id,
+                        path=str(file_path),
+                        artifact_type="code"
+                    )
+
+                output_refs["files"] = files_written
+
+                # Also store the changes metadata
                 changes_path = project_dir / ".atlas" / "changes" / f"job_{task.job_id}.json"
                 changes_path.parent.mkdir(parents=True, exist_ok=True)
-                changes_path.write_text(json.dumps(result["code_changes"], indent=2))
+                changes_metadata = {
+                    "files_created": list(result["code_changes"].keys()),
+                    "description": result.get("description", ""),
+                    "summary": result.get("summary", "")
+                }
+                changes_path.write_text(json.dumps(changes_metadata, indent=2))
                 output_refs["changes"] = str(changes_path)
-
-                self.db.create_artifact(
-                    job_id=task.job_id,
-                    path=str(changes_path),
-                    artifact_type="code"
-                )
 
         elif task.stage == JobStage.REVIEW:
             if "review.md" in result:

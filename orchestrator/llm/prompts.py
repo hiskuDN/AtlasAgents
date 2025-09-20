@@ -7,9 +7,9 @@ class AgentPrompts:
     """Manages prompts for different agent roles."""
 
     SYSTEM_PROMPTS = {
-        "planner": """You are a senior technical architect creating implementation plans.
-Your role is to analyze requirements and create clear, actionable plans.
-Focus on practical implementation steps, identifying risks, and suggesting approaches.
+        "planner": """You are a senior technical architect creating an implementation plan for building an application.
+Your role is to analyze the project requirements and create a clear plan for developing the specified application.
+Focus on the technical approach, architecture, and implementation strategy for the actual application described in the requirements.
 Output should be in markdown format with clear sections.""",
 
         "spec_writer": """You are a technical specification writer.
@@ -30,11 +30,9 @@ Also verify that the implementation meets the specifications."""
 
     TASK_PROMPTS = {
         "planner": """
-Given the following project context and requirements, create an implementation plan.
+Create an implementation plan for building the following application:
 
 Project: {project_name}
-Workspace: {workspace_path}
-Current Stage: {stage}
 
 Requirements:
 {requirements}
@@ -42,18 +40,19 @@ Requirements:
 Additional Context:
 {context}
 
-Please provide:
-1. An overview of the implementation approach
-2. Key objectives and goals
-3. Phases or milestones
-4. Potential risks and mitigation strategies
-5. Estimated timeline
+Please provide a plan for BUILDING THIS SPECIFIC APPLICATION with:
+1. Overview of the technical architecture
+2. Core components needed (e.g., UI, business logic, data handling)
+3. Technology choices and rationale
+4. Development approach and phases
+5. Key features to implement
 
-Format your response as a markdown document with clear sections.
+Focus on planning the actual application development, NOT project management.
+Format your response as a markdown document.
 """,
 
         "spec_writer": """
-Based on the following plan, create a technical specification.
+Based on the following plan, create a technical specification for implementing the application.
 
 Project: {project_name}
 Plan:
@@ -62,11 +61,14 @@ Plan:
 Additional Context:
 {context}
 
-Please provide a concise specification with:
-1. Technical requirements (brief bullet points)
+Please provide a concise technical specification with:
+1. File structure (what files will be created)
 2. Key components and their responsibilities
-3. Main implementation steps (5-7 steps max)
+3. Implementation approach for core functionality
+4. User interface design overview
+5. Main implementation steps
 
+Focus on the actual application implementation details.
 Keep the response focused and under 1500 words.
 Format as markdown with clear sections.
 """,
@@ -83,19 +85,25 @@ Specification:
 
 Workspace Path: {workspace_path}
 
-Please:
-1. Analyze the task requirements
-2. Identify which files need to be created or modified
-3. Implement the solution
-4. Describe the changes you're making
+Please implement the complete solution. For each file you create:
+1. Clearly state the filename (e.g., "Creating file: index.html")
+2. Follow immediately with the complete file contents in a markdown code block
 
-Format your response as:
-1. Brief summary of what you're implementing
-2. List of files being created/modified
-3. The actual code changes
-4. Any additional notes or considerations
+Example format:
+Creating file: index.html
+```html
+<!DOCTYPE html>
+<html>
+...
+</html>
+```
 
-Use markdown code blocks for code snippets.
+Creating file: script.js
+```javascript
+// JavaScript code here
+```
+
+Provide the COMPLETE implementation for all necessary files.
 """,
 
         "reviewer": """

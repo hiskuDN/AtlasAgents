@@ -107,17 +107,36 @@ class SyncLLMAgent(SyncBaseAgent):
         Returns:
             Formatted prompt
         """
-        # Base context
+        # Get project name and requirements
+        workspace_path = Path(request.context.workspace_path)
+        project_name = workspace_path.name
+
+        # Read requirements.yaml for actual project requirements
+        requirements_content = ""
+        req_file = workspace_path / "requirements.yaml"
+        if req_file.exists():
+            try:
+                import yaml
+                with open(req_file, 'r') as f:
+                    req_data = yaml.safe_load(f)
+                    if 'requirements' in req_data:
+                        requirements_content = "\n".join(f"- {req}" for req in req_data['requirements'])
+                    if 'description' in req_data:
+                        requirements_content = f"{req_data['description']}\n\nRequirements:\n{requirements_content}"
+            except:
+                requirements_content = req_file.read_text()
+
+        # Base context with actual project name
         prompt_args = {
-            'project_name': f"Project {request.context.project_id}",
+            'project_name': project_name,
             'workspace_path': request.context.workspace_path,
             'stage': request.context.stage,
-            'context': request.prompt
+            'context': requirements_content or request.prompt
         }
 
         # Add role-specific context
         if self.role == AgentRole.PLANNER:
-            prompt_args['requirements'] = request.prompt
+            prompt_args['requirements'] = requirements_content or request.prompt
 
         elif self.role == AgentRole.SPEC_WRITER:
             # Add plan content if available
@@ -183,14 +202,41 @@ class SyncLLMAgent(SyncBaseAgent):
             artifacts['tasks'] = tasks
 
         elif self.role == AgentRole.CODER:
-            # Extract code blocks
-            code_blocks = re.findall(r'```[\w]*\n(.*?)```', llm_response, re.DOTALL)
+            # Parse the response to extract file paths and code
+            files_created = {}
 
-            artifacts['code_changes'] = {
-                'description': llm_response,
-                'code_blocks': code_blocks
-            }
-            artifacts['summary'] = 'Implementation complete'
+            # Look for patterns like "Creating file: path/to/file.ext" or "File: path/to/file.ext"
+            # followed by code blocks
+            pattern = r'(?:Creating file:|File:|Creating|Modifying)\s*[:\s]*([a-zA-Z0-9_\-/]+\.[\w]+).*?```[\w]*\n(.*?)```'
+            matches = re.findall(pattern, llm_response, re.DOTALL | re.IGNORECASE)
+
+            if matches:
+                for filepath, code in matches:
+                    # Clean up the filepath
+                    filepath = filepath.strip().strip(':').strip()
+                    # Remove any markdown formatting
+                    filepath = filepath.replace('`', '').replace('*', '').strip()
+                    files_created[filepath] = code.strip()
+            else:
+                # Fallback: try to extract any code blocks
+                code_blocks = re.findall(r'```[\w]*\n(.*?)```', llm_response, re.DOTALL)
+                if code_blocks:
+                    # If we have code but no explicit paths, create default files based on content
+                    for i, code in enumerate(code_blocks):
+                        # Try to guess the file type from the code
+                        if '<html' in code.lower() or '<!doctype' in code.lower():
+                            filename = 'index.html' if i == 0 else f'file_{i}.html'
+                        elif 'function' in code or 'const' in code or 'let' in code or 'var' in code:
+                            filename = 'script.js' if i == 0 else f'script_{i}.js'
+                        elif 'body' in code or 'color:' in code or '{' in code:
+                            filename = 'styles.css' if 'css' in llm_response.lower() else f'file_{i}.css'
+                        else:
+                            filename = f'file_{i}.txt'
+                        files_created[filename] = code.strip()
+
+            artifacts['code_changes'] = files_created
+            artifacts['summary'] = f'Created {len(files_created)} files'
+            artifacts['description'] = llm_response
 
         elif self.role == AgentRole.REVIEWER:
             artifacts['review.md'] = llm_response
