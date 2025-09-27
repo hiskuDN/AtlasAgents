@@ -1,3 +1,35 @@
+# AtlasAgents — Requirements
+
+## Current Status (Updated: Sep 27, 2024)
+
+### ✅ Completed:
+1. **Core Orchestrator**: State machine, job management, database layer
+2. **Agent Framework**: Base classes, factory pattern, role-based agents
+3. **LLM Integration**: Ollama support with streaming, timeout handling
+4. **Pipeline Stages**: PLAN → SPEC → CODE working end-to-end
+5. **CLI**: Basic commands (init, switch, run, approve, status, list)
+6. **Requirements Integration**: Agents now receive actual project requirements
+7. **File Generation**: CODE stage creates actual files in src/
+8. **Logging System**: Comprehensive logging with rotation
+9. **Bug Fixes**:
+   - Async/threading conflicts resolved (converted to sync)
+   - File parsing regex fixed for various LLM output formats
+   - CLI progress monitoring fixed
+
+### 🚧 In Progress:
+- **REVIEW Stage**: Basic structure exists, needs iteration logic
+
+### 📋 Next Steps:
+1. **Review-Code Iteration Loop**:
+   - If review finds issues → update review.md with required changes
+   - Transition back to CODE stage with review feedback
+   - Continue until review approves
+
+2. **MCP Integration**: Currently using mock mode
+3. **Telegram Integration**: Approval system exists but uses CLI
+4. **Git Integration**: Checkpointing and branching not implemented
+5. **Testing**: Unit tests for critical components
+
 # AtlasAgents — Requirements 
 
 ## 0) Scope
