@@ -205,17 +205,25 @@ class SyncLLMAgent(SyncBaseAgent):
             # Parse the response to extract file paths and code
             files_created = {}
 
+            # First, clean up the response to remove markdown formatting
+            # This helps when LLM outputs "### Creating file: index.html"
+            cleaned_response = llm_response.replace('###', '').replace('##', '').replace('#', '')
+            cleaned_response = cleaned_response.replace('**', '').replace('*', '')
+
             # Look for patterns like "Creating file: path/to/file.ext" or "File: path/to/file.ext"
             # followed by code blocks
-            pattern = r'(?:Creating file:|File:|Creating|Modifying)\s*[:\s]*([a-zA-Z0-9_\-/]+\.[\w]+).*?```[\w]*\n(.*?)```'
-            matches = re.findall(pattern, llm_response, re.DOTALL | re.IGNORECASE)
+            # Updated pattern to be more flexible with spacing and punctuation
+            pattern = r'(?:Creating file|File|Creating|Modifying)[\s:]*([a-zA-Z0-9_\-/.]+\.\w+).*?```[\w]*\n(.*?)```'
+            matches = re.findall(pattern, cleaned_response, re.DOTALL | re.IGNORECASE)
 
             if matches:
                 for filepath, code in matches:
-                    # Clean up the filepath
+                    # Clean up the filepath - remove any remaining special chars
                     filepath = filepath.strip().strip(':').strip()
-                    # Remove any markdown formatting
-                    filepath = filepath.replace('`', '').replace('*', '').strip()
+                    # Ensure we only get the actual filename, not any surrounding text
+                    # In case there's still extra text, extract just the filename part
+                    import os
+                    filepath = os.path.basename(filepath) if '/' not in filepath else filepath
                     files_created[filepath] = code.strip()
             else:
                 # Fallback: try to extract any code blocks
