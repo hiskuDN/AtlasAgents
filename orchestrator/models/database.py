@@ -102,11 +102,18 @@ class Database:
                     input_ref TEXT,
                     output_ref TEXT,
                     status TEXT DEFAULT 'pending',
+                    iteration_count INTEGER DEFAULT 0,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     FOREIGN KEY (project_id) REFERENCES projects(id)
                 )
             """)
+
+            # Check if iteration_count column exists, add if not (migration)
+            cursor.execute("PRAGMA table_info(jobs)")
+            columns = [col[1] for col in cursor.fetchall()]
+            if 'iteration_count' not in columns:
+                cursor.execute("ALTER TABLE jobs ADD COLUMN iteration_count INTEGER DEFAULT 0")
 
             # Approvals table
             cursor.execute("""
@@ -233,13 +240,13 @@ class Database:
             conn.commit()
 
     # Job operations
-    def create_job(self, project_id: int, stage: str, agent: str) -> int:
+    def create_job(self, project_id: int, stage: str, agent: str, iteration_count: int = 0) -> int:
         """Create a new job."""
         with self.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute(
-                "INSERT INTO jobs (project_id, stage, agent) VALUES (?, ?, ?)",
-                (project_id, stage, agent)
+                "INSERT INTO jobs (project_id, stage, agent, iteration_count) VALUES (?, ?, ?, ?)",
+                (project_id, stage, agent, iteration_count)
             )
             return cursor.lastrowid
 
@@ -407,6 +414,20 @@ class Database:
                 (job_id, path, artifact_type, sha)
             )
             return cursor.lastrowid
+
+    def get_latest_job_for_stage(self, project_id: int, stage: JobStage) -> Optional[Dict]:
+        """Get the most recent job for a specific stage."""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """SELECT * FROM jobs
+                WHERE project_id = ? AND stage = ?
+                ORDER BY created_at DESC
+                LIMIT 1""",
+                (project_id, stage.value)
+            )
+            row = cursor.fetchone()
+            return dict(row) if row else None
 
     def execute_query(self, query: str) -> List[Dict]:
         """Execute a raw SQL query."""

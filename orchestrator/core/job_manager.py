@@ -312,6 +312,10 @@ class JobExecutor:
                 review_path.write_text(result["review.md"])
                 output_refs["review"] = str(review_path)
 
+                # Include the parsed approval status for state machine decisions
+                if "approval_status" in result:
+                    output_refs["approval_status"] = result["approval_status"]
+
                 self.db.create_artifact(
                     job_id=task.job_id,
                     path=str(review_path),

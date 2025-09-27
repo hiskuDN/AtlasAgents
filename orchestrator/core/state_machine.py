@@ -163,11 +163,36 @@ class StateMachine:
             logger.warning(f"No agent defined for stage {context.current_stage}")
             return None
 
-        # Create a new job
+        # Check iteration count if this is a CODE stage
+        iteration_count = 0
+        MAX_ITERATIONS = 3  # Prevent infinite loops
+
+        if context.current_stage == JobStage.CODE:
+            # Check if we're coming from REVIEW (iteration)
+            last_review = self.db.get_latest_job_for_stage(project_id, JobStage.REVIEW)
+            if last_review:
+                # Get the previous CODE job to increment its iteration count
+                last_code = self.db.get_latest_job_for_stage(project_id, JobStage.CODE)
+                if last_code:
+                    iteration_count = last_code.get('iteration_count', 0) + 1
+
+                    # Check for max iterations
+                    if iteration_count >= MAX_ITERATIONS:
+                        logger.error(f"Maximum review iterations ({MAX_ITERATIONS}) reached for project {project_id}")
+                        self.db.add_message(
+                            project_id=project_id,
+                            role="orchestrator",
+                            content=f"Maximum review iterations ({MAX_ITERATIONS}) reached. Manual intervention required.",
+                            meta={"iteration_count": iteration_count}
+                        )
+                        return None
+
+        # Create a new job with iteration count
         job_id = self.db.create_job(
             project_id=project_id,
             stage=context.current_stage.value,
-            agent=agent.value
+            agent=agent.value,
+            iteration_count=iteration_count
         )
 
         context.job_id = job_id
@@ -238,19 +263,61 @@ class StateMachine:
 
         # Handle based on status
         if status == ApprovalStatus.APPROVED:
-            # Determine next stage
-            next_stage = self._get_next_stage(context.current_stage)
+            # Special handling for REVIEW stage
+            if context.current_stage == JobStage.REVIEW:
+                # Check the review assessment from the last job
+                last_job = self.db.get_latest_job_for_stage(project_id, JobStage.REVIEW)
+                if last_job and last_job.get('output_ref'):
+                    # Try to load the review to check assessment
+                    import json
+                    try:
+                        output = json.loads(last_job['output_ref'])
+                        review_status = output.get('approval_status', 'approved')
 
-            self.db.add_message(
-                project_id=project_id,
-                role="orchestrator",
-                content=f"Approval granted for {context.current_stage} stage",
-                meta={
-                    "approval_id": approval_id,
-                    "actor": actor,
-                    "next_stage": next_stage.value if next_stage else None
-                }
-            )
+                        # If review found issues, go back to CODE
+                        if review_status in ['needs_work', 'major_issues']:
+                            next_stage = JobStage.CODE
+                            self.db.add_message(
+                                project_id=project_id,
+                                role="orchestrator",
+                                content=f"Review found issues - returning to CODE stage for revision",
+                                meta={
+                                    "approval_id": approval_id,
+                                    "actor": actor,
+                                    "review_status": review_status
+                                }
+                            )
+                        else:
+                            # Review approved, move to DONE
+                            next_stage = JobStage.DONE
+                            self.db.add_message(
+                                project_id=project_id,
+                                role="orchestrator",
+                                content=f"Review approved - moving to DONE",
+                                meta={
+                                    "approval_id": approval_id,
+                                    "actor": actor
+                                }
+                            )
+                    except:
+                        # Fallback to default next stage
+                        next_stage = self._get_next_stage(context.current_stage)
+                else:
+                    next_stage = self._get_next_stage(context.current_stage)
+            else:
+                # Normal flow for other stages
+                next_stage = self._get_next_stage(context.current_stage)
+
+                self.db.add_message(
+                    project_id=project_id,
+                    role="orchestrator",
+                    content=f"Approval granted for {context.current_stage} stage",
+                    meta={
+                        "approval_id": approval_id,
+                        "actor": actor,
+                        "next_stage": next_stage.value if next_stage else None
+                    }
+                )
 
             # Mark job as completed
             if context.job_id:

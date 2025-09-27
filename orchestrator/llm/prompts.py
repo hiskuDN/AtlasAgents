@@ -22,10 +22,10 @@ Your role is to write clean, maintainable code following best practices.
 Focus on one task at a time, ensuring proper error handling and documentation.
 Describe the changes you're making and which files are affected.""",
 
-        "reviewer": """You are a senior code reviewer.
-Your role is to review code changes for quality, security, and best practices.
-Provide constructive feedback, identify potential issues, and suggest improvements.
-Also verify that the implementation meets the specifications."""
+        "reviewer": """You are a senior code reviewer conducting a thorough code review.
+Your role is to review code changes for quality, correctness, security, and best practices.
+Identify issues, provide constructive feedback, and determine if the code is ready for production.
+Verify that the implementation meets all specifications and requirements."""
     }
 
     TASK_PROMPTS = {
@@ -83,9 +83,11 @@ Task Description: {task_description}
 Specification:
 {spec_content}
 
+{review_feedback}
+
 Workspace Path: {workspace_path}
 
-Please implement the complete solution. For each file you create:
+Please implement the complete solution. For each file you create or modify:
 1. Clearly state the filename (e.g., "Creating file: index.html")
 2. Follow immediately with the complete file contents in a markdown code block
 
@@ -107,24 +109,46 @@ Provide the COMPLETE implementation for all necessary files.
 """,
 
         "reviewer": """
-Review the following code changes for quality and correctness.
+Review the following code implementation for quality and correctness.
 
 Project: {project_name}
 Specification:
 {spec_content}
 
-Code Changes:
+Files to Review:
 {changes}
 
-Please provide:
-1. Overall assessment (approved/needs-work)
-2. Code quality review (structure, readability, maintainability)
-3. Security considerations
-4. Performance considerations
-5. Specific suggestions for improvement
-6. Verification that specifications are met
+Please provide a structured review with the following format:
 
-Format as a markdown document with clear sections.
+# Code Review
+
+## Overall Assessment
+State one of: APPROVED, NEEDS_WORK, or MAJOR_ISSUES
+
+## Issues Found
+List each issue with severity [Critical/Major/Minor]:
+- [Severity] File:Line - Description of issue
+
+## Required Changes
+For NEEDS_WORK or MAJOR_ISSUES, list specific changes needed:
+- File: path/to/file.ext
+  - Line X: Specific change required
+  - Line Y: Another change required
+
+## Code Quality
+- Structure and Organization: [Good/Fair/Poor]
+- Readability: [Good/Fair/Poor]
+- Error Handling: [Good/Fair/Poor]
+- Best Practices: [Good/Fair/Poor]
+
+## Specifications Compliance
+- Does the code meet all requirements? [Yes/No]
+- If no, what's missing?
+
+## Recommendations
+Optional improvements that would enhance the code.
+
+Make the assessment clear and actionable.
 """
     }
 
@@ -168,7 +192,8 @@ Format as a markdown document with clear sections.
             'spec_content': '',
             'task_title': 'Task',
             'task_description': 'No description provided',
-            'changes': 'No changes provided'
+            'changes': 'No changes provided',
+            'review_feedback': ''  # Empty by default, filled when in revision mode
         }
 
         # Merge defaults with provided kwargs

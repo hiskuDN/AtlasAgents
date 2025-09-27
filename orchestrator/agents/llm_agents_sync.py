@@ -123,8 +123,12 @@ class SyncLLMAgent(SyncBaseAgent):
                         requirements_content = "\n".join(f"- {req}" for req in req_data['requirements'])
                     if 'description' in req_data:
                         requirements_content = f"{req_data['description']}\n\nRequirements:\n{requirements_content}"
-            except:
+                    logger.debug(f"Loaded requirements from {req_file}: {len(requirements_content)} chars")
+            except Exception as e:
+                logger.warning(f"Failed to parse YAML from {req_file}: {e}")
                 requirements_content = req_file.read_text()
+        else:
+            logger.warning(f"Requirements file not found: {req_file}")
 
         # Base context with actual project name
         prompt_args = {
@@ -154,9 +158,24 @@ class SyncLLMAgent(SyncBaseAgent):
             else:
                 prompt_args['spec_content'] = request.context.artifacts.get('spec', '')
 
-            task = request.context.artifacts.get('current_task', {})
-            prompt_args['task_title'] = task.get('title', 'Implementation Task')
-            prompt_args['task_description'] = task.get('description', request.prompt)
+            # Check if there's review feedback (iteration mode)
+            review_path = Path(request.context.workspace_path) / "docs" / "review.md"
+            if review_path.exists():
+                review_content = review_path.read_text()
+                # Check if this review contains issues to fix
+                if any(term in review_content.lower() for term in ['needs_work', 'needs work', 'major_issues', 'major issues', 'required changes']):
+                    prompt_args['review_feedback'] = review_content
+                    # Modify the task to focus on fixing review issues
+                    prompt_args['task_title'] = 'Fix Review Issues'
+                    prompt_args['task_description'] = 'Address all issues identified in the code review and implement the required changes.'
+                else:
+                    task = request.context.artifacts.get('current_task', {})
+                    prompt_args['task_title'] = task.get('title', 'Implementation Task')
+                    prompt_args['task_description'] = task.get('description', request.prompt)
+            else:
+                task = request.context.artifacts.get('current_task', {})
+                prompt_args['task_title'] = task.get('title', 'Implementation Task')
+                prompt_args['task_description'] = task.get('description', request.prompt)
 
         elif self.role == AgentRole.REVIEWER:
             # Add spec and changes
@@ -249,15 +268,46 @@ class SyncLLMAgent(SyncBaseAgent):
         elif self.role == AgentRole.REVIEWER:
             artifacts['review.md'] = llm_response
 
-            # Try to extract approval status
-            if 'approved' in llm_response.lower():
-                artifacts['approval_status'] = 'approved'
-            elif 'needs-work' in llm_response.lower() or 'needs work' in llm_response.lower():
-                artifacts['approval_status'] = 'needs_work'
-            else:
-                artifacts['approval_status'] = 'pending'
+            # Parse the structured assessment from the review
+            assessment_lower = llm_response.lower()
 
-            artifacts['summary'] = f'Review complete - {artifacts["approval_status"]}'
+            # Look for the Overall Assessment section
+            if 'overall assessment' in assessment_lower:
+                # Extract the assessment value
+                if 'approved' in assessment_lower:
+                    artifacts['approval_status'] = 'approved'
+                elif 'major_issues' in assessment_lower or 'major issues' in assessment_lower:
+                    artifacts['approval_status'] = 'major_issues'
+                elif 'needs_work' in assessment_lower or 'needs work' in assessment_lower:
+                    artifacts['approval_status'] = 'needs_work'
+                else:
+                    artifacts['approval_status'] = 'pending'
+            else:
+                # Fallback to simple keyword search
+                if 'approved' in assessment_lower and 'not approved' not in assessment_lower:
+                    artifacts['approval_status'] = 'approved'
+                elif 'needs work' in assessment_lower or 'needs_work' in assessment_lower:
+                    artifacts['approval_status'] = 'needs_work'
+                else:
+                    artifacts['approval_status'] = 'pending'
+
+            # Extract issues count for summary
+            critical_count = assessment_lower.count('[critical]')
+            major_count = assessment_lower.count('[major]')
+            minor_count = assessment_lower.count('[minor]')
+
+            issues_summary = []
+            if critical_count > 0:
+                issues_summary.append(f"{critical_count} critical")
+            if major_count > 0:
+                issues_summary.append(f"{major_count} major")
+            if minor_count > 0:
+                issues_summary.append(f"{minor_count} minor")
+
+            if issues_summary:
+                artifacts['summary'] = f"Review complete: {', '.join(issues_summary)} issues found"
+            else:
+                artifacts['summary'] = f"Review complete: {artifacts['approval_status']}"
 
         return artifacts
 

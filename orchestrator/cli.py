@@ -757,12 +757,23 @@ def mcp_deny(ctx, call_id, reason):
 @click.argument('decision', type=click.Choice(['approve', 'revise', 'stop']))
 @click.option('--reason', '-r', help='Reason for decision')
 @click.option('--actor', '-a', default='cli_user', help='Actor making the decision')
+@click.option('--iterate', is_flag=True, help='For REVIEW stage: approve but return to CODE if issues found')
 @pass_context
-def approve(ctx, approval_id, decision, reason, actor):
-    """Handle an approval request (for testing without Telegram)."""
+def approve(ctx, approval_id, decision, reason, actor, iterate):
+    """Handle an approval request (for testing without Telegram).
+
+    For REVIEW stage approvals:
+    - Use 'approve' to accept the review (will go to DONE or CODE based on review assessment)
+    - Use 'approve --iterate' to explicitly send back to CODE for fixes
+    - Use 'revise' to request changes to the review itself
+    """
     ctx.ensure_initialized()
 
     try:
+        # If iterate flag is set, add it to the reason for the state machine to handle
+        if iterate and decision == 'approve':
+            reason = (reason or "") + " [ITERATE]"
+
         # Map CLI decision to enum value
         decision_map = {
             'approve': 'approved',
@@ -777,6 +788,8 @@ def approve(ctx, approval_id, decision, reason, actor):
 
         if success:
             console.print(f"[green]✓[/green] Approval {approval_id} {decision}d")
+            if iterate:
+                console.print(f"[yellow]→[/yellow] Will iterate back to CODE stage if review found issues")
         else:
             console.print(f"[red]Error:[/red] Failed to process approval")
             sys.exit(1)
